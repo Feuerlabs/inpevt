@@ -1,0 +1,12 @@
+{application, inpevt,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { inpevt_app, []}},
+  {env, []}
+ ]}.
