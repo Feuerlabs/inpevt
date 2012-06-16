@@ -17,9 +17,28 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(SERVER, ?MODULE). 
+-define(SERVER, ?MODULE).
 
--record(state, {}).
+-record(state,
+        {
+
+        }).
+
+-define (IEDRV_CMD_MASK, 16#0000000F).
+-define (IEDRV_CMD_OPEN, 16#00000001).
+-define (IEDRV_CMD_CLOSE, 16#00000002).
+-define (IEDRV_CMD_ACTIVATE, 16#00000003).
+-define (IEDRV_CMD_DEACTIVATE, 16#00000004).
+-define (IEDRV_CMD_GET_EVENT_VERSION, 16#00000005).
+-define (IEDRV_CMD_GET_BUS_TYPE, 16#00000003).
+
+-define (IEDRV_RES_OK, 0).
+-define (IEDRV_RES_IO_ERROR, 1).
+-define (IEDRV_RES_NOT_OPEN, 2).
+-define (IEDRV_RES_ILLEGAL_ARG, 3).
+
+-define (INPEVT_DRIVER, "inpevt_driver").
+
 
 %%%===================================================================
 %%% API
@@ -58,7 +77,7 @@ init([]) ->
 %% @doc
 %% Handling call messages
 %%
-%% @spec handle_call(Request, From, State) ->
+%% @spec handle_call({open, Device}, From, State) ->
 %%                                   {reply, Reply, State} |
 %%                                   {reply, Reply, State, Timeout} |
 %%                                   {noreply, State} |
@@ -67,9 +86,33 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call({ open, Device }, _From, State) ->
+
+    process_flag(trap_exit, true),
+    LoadRes = erl_ddll:load(code:priv_dir(inpevt), ?INPEVT_DRIVER),
+    if LoadRes =:= ok; LoadRes =:= { error, already_loaded } ->
+            Port = open_port({spawn, ?INPEVT_DRIVER}, []),
+
+            ResList = port_control(Port,
+                                   ?IEDRV_CMD_OPEN,
+                                   [Device]),
+
+            <<ResNative:32/native>> = list_to_binary(ResList),
+            Res = convert_return_value(ResNative bsr 24),
+            ReplyID = ResNative band 16#00FFFFFF,
+            case Res of
+                ok ->
+                    receive
+                        { device_info, _, ReplyID, X } ->
+                            {reply, X, State}
+                    end;
+                Res -> { reply, Res, State }
+            end;
+       true -> { reply, LoadRes, State }
+    end.
+
+
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -125,3 +168,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+convert_return_value(Bits) ->
+    io:format("convert_return_value(): ~w\n", [Bits]),
+    if Bits =:= ?IEDRV_RES_OK -> ok;
+       Bits =:= ?IEDRV_RES_ILLEGAL_ARG -> illegal_arg;
+       Bits =:= ?IEDRV_RES_IO_ERROR -> io_error;
+       Bits =:= ?IEDRV_RES_NOT_OPEN -> not_open;
+       true -> unknown_error
+    end.
