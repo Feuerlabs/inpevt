@@ -24,6 +24,12 @@
 
         }).
 
+%% From /usr/include/linux/input.h
+-record(input_event,
+        {
+          sec, usec, type, code, value
+        }).
+
 -define (IEDRV_CMD_MASK, 16#0000000F).
 -define (IEDRV_CMD_OPEN, 16#00000001).
 -define (IEDRV_CMD_CLOSE, 16#00000002).
@@ -87,7 +93,6 @@ init([]) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call({ open, Device }, _From, State) ->
-
     process_flag(trap_exit, true),
     LoadRes = erl_ddll:load(code:priv_dir(inpevt), ?INPEVT_DRIVER),
     if LoadRes =:= ok; LoadRes =:= { error, already_loaded } ->
@@ -104,13 +109,59 @@ handle_call({ open, Device }, _From, State) ->
                 ok ->
                     receive
                         { device_info, _, ReplyID, X } ->
-                            {reply, X, State}
+                            {reply, {ok, Port, X}, State};
+                        X -> io:format("WEIRD: ~w\n", [ X ])
                     end;
-                Res -> { reply, Res, State }
+                Res -> { reply,  Res, State }
             end;
        true -> { reply, LoadRes, State }
-    end.
+    end;
 
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling call messages
+%%
+%% @spec handle_call({open, Device}, From, State) ->
+%%                                   {reply, Reply, State} |
+%%                                   {reply, Reply, State, Timeout} |
+%%                                   {noreply, State} |
+%%                                   {noreply, State, Timeout} |
+%%                                   {stop, Reason, Reply, State} |
+%%                                   {stop, Reason, State}
+%% @end
+%%--------------------------------------------------------------------
+handle_call({ activate, Port }, _From, State) ->
+    ResList = port_control(Port,
+                           ?IEDRV_CMD_ACTIVATE,
+                           []),
+
+    <<ResNative:32/native>> = list_to_binary(ResList),
+    { reply, convert_return_value(ResNative bsr 24), State };
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling call messages
+%%
+%% @spec handle_call({open, Device}, From, State) ->
+%%                                   {reply, Reply, State} |
+%%                                   {reply, Reply, State, Timeout} |
+%%                                   {noreply, State} |
+%%                                   {noreply, State, Timeout} |
+%%                                   {stop, Reason, Reply, State} |
+%%                                   {stop, Reason, State}
+%% @end
+%%--------------------------------------------------------------------
+handle_call({ deactivate, Port }, _From, State) ->
+    ResList = port_control(Port,
+                           ?IEDRV_CMD_DEACTIVATE,
+                           []),
+
+    <<ResNative:32/native>> = list_to_binary(ResList),
+    { reply, convert_return_value(ResNative bsr 24), State }.
 
 
 
@@ -137,7 +188,21 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    case Info of
+        #input_event {sec = Sec,
+                      usec = Usec,
+                      type = Type,
+                      code = Code,
+                      value = Value} ->
+            EventTS = Sec * 1000000 + Usec,
+            io:format("Got data: TS:~w Type:~w Code:~w Value:~w\n",
+                      [ EventTS, Type, Code, Value] );
+        X ->
+            io:format("Unknown event: ~w\n",[ X ])
+
+
+    end,
     {noreply, State}.
 
 %%--------------------------------------------------------------------
