@@ -10,8 +10,8 @@ When window opens (mapped).
 
 application:start(inpevt).
 {_, P, Cap} = inpevt:open("/dev/input/event0").
-inpevt:activate(P).
 
 application:start(inpevt).
-{_, P, Cap} = inpevt:open("/dev/input/event11").
-inpevt:activate(P).
+{_, P, Cap} = inpevt:open("/dev/input/event3").
+
+{_, P, Cap} = inpevt:open("/dev/input/event11"). mouse

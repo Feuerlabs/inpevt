@@ -26,7 +26,6 @@ typedef struct {
     ErlDrvTermData mDport;
     int mDescriptor; // Opened mDevice
     char mDevice[256]; // /dev/input/...
-    char mActive;  // Are events reported or not?
 } IEContext;
 
 
@@ -92,10 +91,7 @@ static ErlDrvEntry inpevt_driver_entry = {
 
 #define IEDRV_CMD_OPEN  0x00000001
 #define IEDRV_CMD_CLOSE 0x00000002
-#define IEDRV_CMD_ACTIVATE 0x00000003
-#define IEDRV_CMD_DEACTIVATE 0x00000004
-#define IEDRV_CMD_GET_EVENT_VERSION 0x00000005
-#define IEDRV_CMD_GET_BUS_TYPE 0x00000003
+#define IEDRV_CMD_PROBE 0x00000003
 
 #define IEDRV_RES_MASK 0xFF;
 #define IEDRV_RES_OK 0
@@ -115,61 +111,14 @@ static ErlDrvTermData ie_absinfo;
 static ErlDrvTermData ie_abs;
 static ErlDrvTermData ie_relative;
 static ErlDrvTermData ie_sync;
-static ErlDrvTermData ie_id;
-static ErlDrvTermData ie_version;
-static ErlDrvTermData ie_topology;
+static ErlDrvTermData ie_dev_id;
 static ErlDrvTermData ie_capability;
 static ErlDrvTermData ie_name;
 static ErlDrvTermData ie_device_info;
 static ErlDrvTermData ie_unknown;
 static ErlDrvTermData ie_bus_type;
-static ErlDrvTermData ie_pci;
-static ErlDrvTermData ie_bus_type;
-static ErlDrvTermData ie_pci;
-static ErlDrvTermData ie_isapnp;
-static ErlDrvTermData ie_usb;
-static ErlDrvTermData ie_hil;
-static ErlDrvTermData ie_bluetooth;
-static ErlDrvTermData ie_virtual;
-static ErlDrvTermData ie_isa;
-static ErlDrvTermData ie_i8042;
-static ErlDrvTermData ie_xtkbd;
-static ErlDrvTermData ie_rs232;
-static ErlDrvTermData ie_gameport;
-static ErlDrvTermData ie_parport;
-static ErlDrvTermData ie_amiga;
-static ErlDrvTermData ie_adb;
-static ErlDrvTermData ie_i2c;
-static ErlDrvTermData ie_host;
-static ErlDrvTermData ie_gsc;
-static ErlDrvTermData ie_atari;
-static ErlDrvTermData ie_spi;
 
 
-struct {
-    ErlDrvTermData* mAtom;
-    __u16 mBusType;
-} mBusTypeMap[] = {
-    { &ie_pci, BUS_PCI },
-    { &ie_isapnp, BUS_ISAPNP },
-    { &ie_usb, BUS_USB },
-    { &ie_hil, BUS_HIL },
-    { &ie_bluetooth, BUS_BLUETOOTH },
-    { &ie_virtual, BUS_VIRTUAL },
-    { &ie_isa, BUS_ISA },
-    { &ie_i8042, BUS_I8042 },
-    { &ie_xtkbd, BUS_XTKBD },
-    { &ie_rs232, BUS_RS232 },
-    { &ie_gameport, BUS_GAMEPORT },
-    { &ie_parport, BUS_PARPORT },
-    { &ie_amiga, BUS_AMIGA },
-    { &ie_adb, BUS_ADB },
-    { &ie_i2c, BUS_I2C },
-    { &ie_host, BUS_HOST },
-    { &ie_gsc, BUS_GSC },
-    { &ie_atari, BUS_ATARI },
-    { &ie_spi, BUS_SPI }
-};
 
 struct AtomNameBitMap {
     unsigned int bit;
@@ -178,6 +127,30 @@ struct AtomNameBitMap {
 };
 
 
+
+static struct AtomNameBitMap bus_cap_map[] = {
+    { 0x00, "unknown", 0 },
+    { BUS_PCI, "pci", 0 },
+    { BUS_ISAPNP, "isapnp", 0 },
+    { BUS_USB, "usb", 0 },
+    { BUS_HIL, "hil", 0 },
+    { BUS_BLUETOOTH, "bluetooth", 0 },
+    { BUS_VIRTUAL, "virtual", 0 },
+    { BUS_ISA, "isa", 0 },
+    { BUS_I8042, "i8042", 0 },
+    { BUS_XTKBD, "xtkbd", 0 },
+    { BUS_RS232, "rs232", 0 },
+    { BUS_GAMEPORT, "gameport", 0 },
+    { BUS_PARPORT, "parport", 0 },
+    { BUS_AMIGA, "amiga", 0 },
+    { BUS_ADB, "adb", 0 },
+    { BUS_I2C, "i2c", 0 },
+    { BUS_HOST, "host", 0 },
+    { BUS_GSC, "gsc", 0 },
+    { BUS_ATARI, "atari", 0 },
+    { BUS_SPI, "spi", 0 }
+};
+static ErlDrvTermData* bus_atoms[0x1C + 1]; // No BUS_MAX. Picked from BUS_XXX in input.h
 
 static struct AtomNameBitMap type_cap_map[] = {
     { EV_SYN, "syn", 0 },
@@ -209,19 +182,23 @@ static struct AtomNameBitMap sync_cap_map[] = {
 
 static ErlDrvTermData* sync_atoms[4]; // No TYPE_MAX
 
+
 static struct AtomNameBitMap sw_cap_map[] = {
-    { EV_SYN, "syn", 0 },
-    { EV_KEY, "key", 0 },
-    { EV_REL, "rel", 0 },
-    { EV_ABS, "abs", 0 },
-    { EV_MSC, "msc", 0 },
-    { EV_SW,  "sw", 0 },
-    { EV_LED, "led", 0 },
-    { EV_SND, "snd", 0 },
-    { EV_REP, "rep", 0 },
-    { EV_FF, "ff", 0 },
-    { EV_PWR, "pwr", 0 },
-    { EV_FF_STATUS, "ff_status", 0 }
+    { SW_LID, "lid", 0 },
+    { SW_TABLET_MODE, "tablet_mode", 0 },
+    { SW_HEADPHONE_INSERT, "headphone_insert", 0 },
+    { SW_RFKILL_ALL, "rfkill_all", 0 },
+    { SW_RADIO, "radio", 0 },
+    { SW_MICROPHONE_INSERT, "microphone_insert", 0 },
+    { SW_DOCK, "dock", 0 },
+    { SW_LINEOUT_INSERT, "lineout_insert", 0 },
+    { SW_JACK_PHYSICAL_INSERT, "jack_physical_insert", 0 },
+    { SW_VIDEOOUT_INSERT, "videoout_insert", 0 },
+    { SW_CAMERA_LENS_COVER, "camera_lens_cover", 0 },
+    { SW_KEYPAD_SLIDE, "keypad_slide", 0 },
+    { SW_FRONT_PROXIMITY, "front_proximity", 0 },
+    { SW_ROTATE_LOCK, "rotate_lock", 0 },
+    { SW_LINEIN_INSERT, "linein_insert", 0 },
 };
 
 static ErlDrvTermData* sw_atoms[SW_MAX + 1];
@@ -231,8 +208,8 @@ static struct AtomNameBitMap rel_cap_map[] = {
     { REL_Y, "y", 0 },
     { REL_Z, "z", 0 },
     { REL_RX, "rx", 0 },
-    { REL_RY, "rx", 0 },
-    { REL_RZ, "rx", 0 },
+    { REL_RY, "ry", 0 },
+    { REL_RZ, "rz", 0 },
     { REL_HWHEEL, "hwheel", 0 },
     { REL_DIAL, "dial", 0 },
     { REL_WHEEL, "wheel", 0 },
@@ -808,35 +785,11 @@ static void setup_atoms(void)
     ie_absinfo = driver_mk_atom("abs_info");
     ie_sync = driver_mk_atom("sync");
     ie_relative = driver_mk_atom("relative");
-    ie_id = driver_mk_atom("id");
-    ie_version = driver_mk_atom("version");
-    ie_topology = driver_mk_atom("topology");
+    ie_dev_id = driver_mk_atom("dev_id");
     ie_capability = driver_mk_atom("capability");
     ie_name = driver_mk_atom("name");
     ie_device_info = driver_mk_atom("device_info");
     ie_bus_type = driver_mk_atom("bus_type");
-    ie_unknown = driver_mk_atom("unknown");
-    ie_pci = driver_mk_atom("pci");
-    ie_bus_type = driver_mk_atom("bus_type");
-    ie_pci = driver_mk_atom("pci");
-    ie_isapnp = driver_mk_atom("isapnp");
-    ie_usb = driver_mk_atom("usb");
-    ie_hil = driver_mk_atom("hil");
-    ie_bluetooth = driver_mk_atom("bluetooth");
-    ie_virtual = driver_mk_atom("virtual");
-    ie_isa = driver_mk_atom("isa");
-    ie_i8042 = driver_mk_atom("i8042");
-    ie_xtkbd = driver_mk_atom("xtkbd");
-    ie_rs232 = driver_mk_atom("rs232");
-    ie_gameport = driver_mk_atom("gameport");
-    ie_parport = driver_mk_atom("parport");
-    ie_amiga = driver_mk_atom("amiga");
-    ie_adb = driver_mk_atom("adb");
-    ie_i2c = driver_mk_atom("i2c");
-    ie_host = driver_mk_atom("host");
-    ie_gsc = driver_mk_atom("gsc");
-    ie_atari = driver_mk_atom("atari");
-    ie_spi = driver_mk_atom("spi");
 }
 
 static ErlDrvData inpevt_start(ErlDrvPort port, char *command)
@@ -847,7 +800,6 @@ static ErlDrvData inpevt_start(ErlDrvPort port, char *command)
     ctx->mDescriptor = -1;
     ctx->mPort = port;
     ctx->mDport = driver_mk_port(port);
-    ctx->mActive = 0;
     ctx->mDevice[0] = 0;
 //    set_port_control_flags(port, PORT_CONTROL_FLAG_BINARY);
     set_port_control_flags(port, 0);
@@ -870,6 +822,9 @@ static int inpevt_init(void)
         type_atoms[i].code_sz = 0;
     }
 
+    for(i = 0; i < sizeof(bus_atoms) / sizeof(bus_atoms[0]); ++i)
+        bus_atoms[i] = 0;
+
     for(i = 0; i < sizeof(sync_atoms) / sizeof(sync_atoms[0]); ++i)
         sync_atoms[i] = 0;
 
@@ -884,6 +839,13 @@ static int inpevt_init(void)
 
     for(i = 0; i < sizeof(key_atoms) / sizeof(key_atoms[0]); ++i)
         key_atoms[i] = 0;
+
+
+    // Setup the bus atoms
+    for(i = 0; i < sizeof(bus_cap_map) / sizeof(bus_cap_map[0]); ++i) {
+        bus_cap_map[i].atom = driver_mk_atom(bus_cap_map[i].name);
+        bus_atoms[bus_cap_map[i].bit] = &(bus_cap_map[i].atom);
+    }
 
     // Init sync_cap_map, and the array used to
     // find the correct atom for each EV_XXX value.
@@ -948,14 +910,13 @@ static ErlDrvSSizeT inpevt_control (ErlDrvData drv_data,
                                     ErlDrvSizeT rlen)
 {
     IEContext* ctx = 0;
-    unsigned int ev_ver = 0;
     static unsigned int reply_id = 0;
     unsigned char res = 0;
 
     ctx = (IEContext*) drv_data;
 
     switch(command & IEDRV_CMD_MASK) {
-    case IEDRV_CMD_OPEN:
+    case IEDRV_CMD_PROBE:
     {
         // Make a stack copy of buf so that we can add a null.
         if (len > sizeof(ctx->mDevice) - 1) {
@@ -969,74 +930,43 @@ static ErlDrvSSizeT inpevt_control (ErlDrvData drv_data,
 
 
         if ((res = open_event_device(ctx)) != IEDRV_RES_OK  ||
-            (res = send_device_info(ctx, reply_id)) != IEDRV_RES_OK)
+            (res = send_device_info(ctx, reply_id)) != IEDRV_RES_OK) {
+            close(ctx->mDescriptor);
+            ctx->mDescriptor = -1;
             return port_ctl_return_val(res, 0, *rbuf);
-
+        }
+        close(ctx->mDescriptor);
+        ctx->mDescriptor = -1;
         return port_ctl_return_val(IEDRV_RES_OK, reply_id++, *rbuf);
     }
 
-    case IEDRV_CMD_ACTIVATE:
-        if (ctx->mDescriptor == -1) {
-            return port_ctl_return_val(IEDRV_RES_OK, 0, *rbuf);
-        }
-        ctx->mActive = 1;
+    case IEDRV_CMD_OPEN:
+    {
+        if ((res = open_event_device(ctx)) != IEDRV_RES_OK)
+            return port_ctl_return_val(res, 0, *rbuf);
+
         driver_select(ctx->mPort, (ErlDrvEvent) ctx->mDescriptor, DO_READ, 1);
         return port_ctl_return_val(IEDRV_RES_OK, 0, *rbuf);
-
-
-    case IEDRV_CMD_DEACTIVATE:
-        if (ctx->mDescriptor == -1) {
-            **rbuf = IEDRV_RES_NOT_OPEN;
-            return 1;
-        }
-        if (ctx->mActive == 1) {
-            ctx->mActive = 0;
-            driver_select(ctx->mPort, (ErlDrvEvent) ctx->mDescriptor, DO_READ, 0);
-        }
-        return port_ctl_return_val(IEDRV_RES_OK, 0, *rbuf);
-        return 1;
-
-
-    case IEDRV_CMD_GET_EVENT_VERSION:
-        if (ctx->mDescriptor == -1) {
-            **rbuf = IEDRV_RES_NOT_OPEN;
-            return 1;
-        }
-        if (rlen < sizeof(ev_ver))
-            *rbuf = driver_alloc_binary((ErlDrvSizeT) (sizeof(ev_ver) + 1))->orig_bytes;
-
-        if (ioctl(ctx->mDescriptor, EVIOCGVERSION, &ev_ver) == -1) {
-            **rbuf = IEDRV_RES_IO_ERROR;
-        }
-
-        // Return [ok:8][version:32]
-        **rbuf = IEDRV_RES_OK;
-        memcpy((*rbuf) + 1, &ev_ver, sizeof(ev_ver));
-        return 1 + sizeof(ev_ver);
-
+    }
 
     // Are we closing?
     case IEDRV_CMD_CLOSE:
         // Remove from select set.
-        if (ctx->mDescriptor != -1 && ctx->mActive == 1)
+        if (ctx->mDescriptor != -1)
             driver_select(ctx->mPort, (ErlDrvEvent) ctx->mDescriptor, DO_READ, 0);
 
         close(ctx->mDescriptor);
-
-        // FIXME: UNEXPORT
         ctx->mDescriptor = -1;
-        ctx->mActive = 0;
 
         **rbuf = IEDRV_RES_OK;
         return 1;
-
 
     default:
         break;
     }
 
-    puts("Illegal command\r");
-    **rbuf = IEDRV_RES_ILLEGAL_ARG;
+    return port_ctl_return_val(IEDRV_RES_ILLEGAL_ARG, 0, *rbuf);
+    printf("inpevt_control(): Illegal command: 0x%X \r\n", command);
     return 1;
 }
 
@@ -1073,7 +1003,10 @@ static void inpevt_ready_input(ErlDrvData drv_data, ErlDrvEvent event)
             else
                 dterm_atom(&dt, ie_unknown);
 
+            dterm_int(&dt, buf[i].code);
+
             dterm_int(&dt, buf[i].value);
+
             dterm_tuple_end(&dt, &ev_mark);
 
             driver_output_term(ctx->mPort,
@@ -1091,7 +1024,6 @@ static unsigned char send_device_info(IEContext* ctx, unsigned int reply_id)
 {
     dterm_mark_t msg;
     dterm_t dt;
-    int i = 0;
     int len = 0;
     char name[256];
     char topology[256];
@@ -1123,64 +1055,35 @@ static unsigned char send_device_info(IEContext* ctx, unsigned int reply_id)
 
     uniq_id[len] = 0;
 
-
-
     dterm_init(&dt);
 
     dterm_tuple_begin(&dt, &msg); {
-        dterm_mark_t prop_list;
+        dterm_mark_t prop;
+
         dterm_atom(&dt, ie_device_info);
         dterm_port(&dt, ctx->mDport);
         dterm_int(&dt, reply_id);
-        dterm_list_begin(&dt, &prop_list); {
-            dterm_mark_t prop;
+
+
+        //
+        // Setup { id, Bustype, Vendor, Product, Version, Name}
+        //
+        dterm_tuple_begin(&dt, &prop); {
+            dterm_atom(&dt, ie_dev_id);
+            dterm_string(&dt, uniq_id, strlen(uniq_id));
+            dterm_string(&dt, name, strlen(name));
+            dterm_atom(&dt, *bus_atoms[id.bustype]);
+            dterm_int(&dt, id.vendor);
+            dterm_int(&dt, id.product);
+            dterm_int(&dt, id.version);
+            dterm_string(&dt, topology, strlen(topology));
 
             //
-            // Setup { id, { Bustype, Vendor, Product, Version, Name }}
-            //
-            dterm_tuple_begin(&dt, &prop); {
-                dterm_mark_t id_prop;
-
-                dterm_atom(&dt, ie_id);
-
-                dterm_tuple_begin(&dt, &id_prop); {
-                    // Find the correct bus atom
-                    for(i = 0; i < sizeof(mBusTypeMap) / sizeof(mBusTypeMap[0]); ++i)
-                        if (mBusTypeMap[i].mBusType == id.bustype)
-                            break;
-
-                    // Did we find something?
-                    if (i < sizeof(mBusTypeMap) / sizeof(mBusTypeMap[0]))
-                        dterm_atom(&dt, *mBusTypeMap[i].mAtom);
-                    else
-                        dterm_atom(&dt, ie_unknown);
-
-                    dterm_int(&dt, id.vendor);
-                    dterm_int(&dt, id.product);
-                    dterm_int(&dt, id.version);
-                    dterm_string(&dt, uniq_id, strlen(uniq_id));
-                    dterm_string(&dt, name, strlen(name));
-                }
-                dterm_tuple_end(&dt, &id_prop);
-            }
-            dterm_tuple_end(&dt, &prop);
-
-            //
-            // Setup { topology, Topology }
-            //
-            dterm_tuple_begin(&dt, &prop); {
-                dterm_atom(&dt, ie_topology);
-                dterm_string(&dt, topology, strlen(topology));
-            }
-            dterm_tuple_end(&dt, &prop);
-
-            //
-            // Setup { capability, [ { Cap, [X] }, { Cap, [Y] }, ...}
+            // Setup [{ capability, [ { Cap, [X] }, { Cap, [Y] }, ...}, ...]
             //
             add_cap(&dt,  ctx->mDescriptor);
-
+            dterm_tuple_end(&dt, &prop);
         }
-        dterm_list_end(&dt, &prop_list);
     }
     dterm_tuple_end(&dt, &msg);
     driver_output_term(ctx->mPort, dterm_data(&dt), dterm_used_size(&dt));
@@ -1208,40 +1111,12 @@ static unsigned char open_event_device(IEContext* ctx)
 
     ctx->mDescriptor = open(ctx->mDevice, O_RDONLY | O_NONBLOCK);
     if (ctx->mDescriptor == -1) {
-        printf("Failed to open %s: %s\n\r", ctx->mDevice, strerror(errno));
+        printf("Failed to open %s: %s\r\n", ctx->mDevice, strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
 
     return IEDRV_RES_OK;
 }
-
-
-
-
-    /*
-     * Do not try to validate absinfo data since it is not expected
-     * to be static, always refresh it in evdev structure.
-     */
-    /* for (i = ABS_X; i <= ABS_MAX; i++) { */
-    /*     if (EvdevBitIsSet(abs_bitmask, i)) { */
-    /*         len = ioctl(ctx->mDescriptor, EVIOCGABS(i), &pEvdev->absinfo[i]); */
-    /*         if (len < 0) { */
-    /*             printf("ioctl EVIOCGABSi(%d) failed: %s\n", */
-    /*                         i, strerror(errno)); */
-    /*             goto error; */
-    /*         } */
-    /*         printf("absolute axis %#x [%d..%d]\n", */
-    /*                i, pEvdev->absinfo[i].maximum, pEvdev->absinfo[i].minimum); */
-    /*     } */
-    /* } */
-
-    /* len = ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bitmask)), key_bitmask); */
-    /* if (len < 0) { */
-    /*     printf("ioctl EVIOCGBIT failed: %s\n", */
-    /*                 strerror(errno)); */
-    /*     return IEDRV_RES_IO_ERROR; */
-    /* } */
-
 
 
 
@@ -1255,14 +1130,10 @@ static char t_bit(unsigned char* bitmask, int bitno)
 
 static unsigned char add_cap(dterm_t* dt, int fd)
 {
-    dterm_mark_t prop;
     unsigned char master_bitmask[EV_MAX / 8 + 1];
     unsigned res = IEDRV_RES_OK;
     dterm_mark_t c_list;
 
-    dterm_tuple_begin(dt, &prop);
-
-    dterm_atom(dt, ie_capability);
     dterm_list_begin(dt, &c_list);
 
     // Retrieve maste capabilities.
@@ -1294,7 +1165,6 @@ static unsigned char add_cap(dterm_t* dt, int fd)
 
 end:
     dterm_list_end(dt, &c_list);
-    dterm_tuple_end(dt, &prop);
 
     return res;
 }
@@ -1319,8 +1189,13 @@ static unsigned char add_key_cap(dterm_t* dt, int fd)
 
     // Add all capabilities present
     for(i = 0; i < sizeof(key_cap_map) / sizeof(key_cap_map[0]); ++i)
-        if (t_bit(bitmask, key_cap_map[i].bit))
+        if (t_bit(bitmask, key_cap_map[i].bit)) {
+            dterm_mark_t cap_tuple;
+            dterm_tuple_begin(dt, &cap_tuple);
             dterm_atom(dt, key_cap_map[i].atom);
+            dterm_int(dt, key_cap_map[i].bit);
+            dterm_tuple_end(dt, &cap_tuple);
+        }
 
     dterm_list_end(dt, &c_list);
     dterm_tuple_end(dt, &prop);
@@ -1365,18 +1240,17 @@ static unsigned char add_abs_cap(dterm_t* dt, int fd)
         }
 
         dterm_tuple_begin(dt, &a_prop);{
-            dterm_mark_t ai_prop;
+            dterm_mark_t cap_tuple;
+            dterm_tuple_begin(dt, &cap_tuple);
             dterm_atom(dt, abs_cap_map[i].atom);
-            dterm_tuple_begin(dt, &ai_prop);{
-                dterm_atom(dt, ie_absinfo);
-                dterm_int(dt, abs_info.value);
-                dterm_int(dt, abs_info.minimum);
-                dterm_int(dt, abs_info.maximum);
-                dterm_int(dt, abs_info.fuzz);
-                dterm_int(dt, abs_info.flat);
-                dterm_int(dt, abs_info.resolution);
-                dterm_tuple_end(dt, &ai_prop);
-            }
+            dterm_atom(dt, ie_absinfo);
+            dterm_int(dt, abs_info.value);
+            dterm_int(dt, abs_info.minimum);
+            dterm_int(dt, abs_info.maximum);
+            dterm_int(dt, abs_info.fuzz);
+            dterm_int(dt, abs_info.flat);
+            dterm_int(dt, abs_info.resolution);
+            dterm_tuple_end(dt, &cap_tuple);
         }
         dterm_tuple_end(dt, &a_prop);
     }
@@ -1407,8 +1281,13 @@ static unsigned char add_rel_cap(dterm_t* dt, int fd)
 
     // Add all capabilities present
     for(i = 0; i < sizeof(rel_cap_map) / sizeof(rel_cap_map[0]); ++i)
-        if (t_bit(bitmask, rel_cap_map[i].bit))
+        if (t_bit(bitmask, rel_cap_map[i].bit)) {
+            dterm_mark_t cap_tuple;
+            dterm_tuple_begin(dt, &cap_tuple);
             dterm_atom(dt, rel_cap_map[i].atom);
+            dterm_tuple_end(dt, &cap_tuple);
+        }
+
 
     dterm_list_end(dt, &c_list);
     dterm_tuple_end(dt, &prop);
@@ -1435,8 +1314,12 @@ static unsigned char add_switch_cap(dterm_t* dt, int fd)
 
     // Add all capabilities present
     for(i = 0; i < sizeof(sw_cap_map) / sizeof(sw_cap_map[0]); ++i)  {
-        if (t_bit(bitmask, sw_cap_map[i].bit))
+        if (t_bit(bitmask, sw_cap_map[i].bit)) {
+            dterm_mark_t cap_tuple;
+            dterm_tuple_begin(dt, &cap_tuple);
             dterm_atom(dt, sw_cap_map[i].atom);
+            dterm_tuple_end(dt, &cap_tuple);
+        }
     }
 
     dterm_list_end(dt, &c_list);
@@ -1464,8 +1347,12 @@ static unsigned char add_sync_cap(dterm_t* dt, int fd)
 
     // Add all capabilities present
     for(i = 0; i < sizeof(sync_cap_map) / sizeof(sync_cap_map[0]); ++i)  {
-        if (t_bit(bitmask, sync_cap_map[i].bit))
+        if (t_bit(bitmask, sync_cap_map[i].bit)) {
+            dterm_mark_t cap_tuple;
+            dterm_tuple_begin(dt, &cap_tuple);
             dterm_atom(dt, sync_cap_map[i].atom);
+            dterm_tuple_end(dt, &cap_tuple);
+        }
     }
 
     dterm_list_end(dt, &c_list);

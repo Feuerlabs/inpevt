@@ -4,19 +4,23 @@
 
 -module(inpevt).
 
--export([open/1,version/1,activate/1,deactivate/1,i/0]).
+-export([subscribe/2, unsubscribe/2, get_devices/0,get_devices/1, get_devices/2,i/0]).
 
-open(Path) ->
-    gen_server:call(inpevt_server, {open, Path }).
+get_devices() ->
+    gen_server:call(inpevt_server, { get_devices }).
 
-version(Descriptor) ->
-    gen_server:call(inpevt_server, { version, Descriptor}).
+get_devices(Capability) ->
+    gen_server:call(inpevt_server, { get_devices, Capability}).
 
-activate(Descriptor) ->
-    gen_server:call(inpevt_server, { activate, Descriptor}).
+get_devices(Capability, CapSpec) ->
+    gen_server:call(inpevt_server, { get_devices, Capability, CapSpec}).
 
-deactivate(Descriptor) ->
-    gen_server:call(inpevt_server, { decative, Descriptor}).
+
+subscribe(Port, Pid) ->
+    gen_server:call(inpevt_server, { subscribe, Port,Pid }).
+
+unsubscribe(Port,Pid) ->
+    gen_server:call(inpevt_server, { unsubscribe, Port, Pid}).
 
 i() ->
     gen_server:call(inpevt_server, { i }).
