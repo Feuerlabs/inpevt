@@ -17,7 +17,7 @@ get_devices(Capability, CapSpec) ->
 
 
 subscribe(Port, Pid) ->
-    gen_server:call(inpevt_server, { subscribe, Port,Pid }).
+    gen_server:call(inpevt_server, { subscribe, Port, Pid }).
 
 unsubscribe(Port,Pid) ->
     gen_server:call(inpevt_server, { unsubscribe, Port, Pid}).

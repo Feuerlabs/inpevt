@@ -115,7 +115,7 @@
                         #rep {} | #ff {} | #pwr {} | #ff_status {}
          }).
 
--record(dev_id, {
+-record(drv_dev_id, {
           id::string(),
           name::string(),
           bus::atom(),
@@ -124,12 +124,20 @@
           version::integer(),
           topology::string(),
           capabilities::list(#cap_spec{})
-         } ).
+          }).
 
 -record(device, {
           port::port(),
+          fname::string(),
           subscribers = [] ::list(pid()),
-          dev_id::#dev_id {}
+          id::string(),
+          name::string(),
+          bus::atom(),
+          vendor::integer(),
+          product::integer(),
+          version::integer(),
+          topology::string(),
+          capabilities::list(#cap_spec{})
           }).
 
 
@@ -140,7 +148,12 @@
 %% From /usr/include/linux/input.h
 -record(input_event,
         {
-          sec, usec, type, code_sym, code_num, value
+          port, sec, usec, type, code_sym, code_num, value
+        }).
+
+-record(removed_event,
+        {
+          port
         }).
 
 -define (IEDRV_CMD_MASK, 16#0000000F).
@@ -154,16 +167,21 @@
 -define (IEDRV_RES_ILLEGAL_ARG, 3).
 
 -define (INPEVT_DRIVER, "inpevt_driver").
-
 -define (INPEVT_DIRECTORY, "/dev/input").
--define (INPEVT_PATTERN, "event*").
+-define (INPEVT_PREFIX, "event").
+
 
 -spec activate_event_port(port()) -> ok|{error, illegal_arg | io_error | not_open}.
 
 -spec deactivate_event_port(port()) -> ok|{error, illegal_arg | io_error | not_open}.
 
--spec add_subscriber(pid(), port(),  #dev_id {}, list(pid()), list(#device{})) -> list(#device{}).
--spec delete_subscriber(pid(), port(),  #dev_id {}, list(pid()), list(#device{})) -> list(#device{}).
+-spec add_subscriber(pid(), #device {}, list(#device{})) ->
+                            { ok, list(#device{}) } |
+                            {error, illegal_arg | io_error | not_open }.
+
+-spec delete_subscriber(pid(), #device {}, list(#device{})) ->
+                               { ok , list(#device{}) } |
+                               { error, not_found | illegal_arg | io_error | not_open }.
 
 -spec filter_cap_key(#device {}, { string(), list(#device{})}) -> list(#device{}).
 -spec filter_cap_spec(#device {}, { string(), list(#device{})}) -> list(#device{}).
@@ -220,15 +238,13 @@ handle_call({ subscribe, Port, Pid }, _From, State) ->
     case lists:keytake(Port, #device.port, DevList) of
         { value, Device,  TempState } ->
             case add_subscriber(Pid,
-                                Port,
-                                Device#device.dev_id,
-                                Device#device.subscribers,
+                                Device,
                                 TempState) of
                 { ok, NewDevList } -> {
                   reply,
                   ok,
                   #state {
-                    devices = [ NewDevList ]
+                    devices = NewDevList
                    }
                  };
 
@@ -255,18 +271,16 @@ handle_call({ unsubscribe, Port, Pid }, _From, State) ->
         {
           value,
           Device,
-          TempState
+          TempDevList
         } ->
             {
               reply,
               ok,
               #state {
                 devices = [ delete_subscriber(Pid,
-                                              Port,
-                                              Device#device.dev_id,
-                                              Device#device.subscribers,
-                                              TempState)
-                            | TempState ]
+                                              Device,
+                                              TempDevList)
+                            | TempDevList ]
                }
             };
 
@@ -286,8 +300,6 @@ handle_call({ get_devices, CapKey }, _From, State) ->
 handle_call({ get_devices, CapKey, CapSpec }, _From, State) ->
     get_devices(State, CapKey, CapSpec);
 
-handle_call({ init }, _From, State) ->
-  handle_call({ init, "/dev/input", "event*"}, _From, State);
 
 %%--------------------------------------------------------------------
 %% @private
@@ -303,9 +315,6 @@ handle_call({ init }, _From, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({ close, Port }, _From, State) ->
-    { Res, _X } = event_port_control(Port, ?IEDRV_CMD_CLOSE, []),
-    { reply, Res, State };
 
 
 handle_call({ i }, _From, State) ->
@@ -338,21 +347,33 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 handle_info(Info, State) ->
     case Info of
-        #input_event {sec = Sec,
-                      usec = Usec,
-                      type = Type,
-                      code_num = CodeNum,
-                      code_sym = CodeSym,
-                      value = Value} ->
-            EventTS = Sec * 1000000 + Usec,
-            io:format("Got data: TS:~w Type:~w CodeNum:~w CodeSym: ~w Value:~w\n",
-                      [ EventTS, Type, CodeNum, CodeSym, Value] );
-        X ->
-            io:format("Unknown event: ~w\n",[ X ])
+        #input_event {} ->
+            dispatch_event(Info, State),
+            {noreply, State};
 
 
-    end,
-    {noreply, State}.
+        %% Since we are talking about simple USB detection here, we can probably
+        %% expect the create atom to be the sole list member.
+        { fevent, _, [ create ], Directory, FileName } ->
+            case FileName of
+               ?INPEVT_PREFIX ++ _ ->
+                    { noreply, add_new_device(Directory, FileName, State) };
+                _ ->
+                    { noreply, State }
+            end;
+
+        { fevent, _, [ delete ], _Directory, FileName } ->
+            case FileName of
+               ?INPEVT_PREFIX ++ _ ->
+                    { noreply, delete_existing_device(FileName, State) };
+
+                _ ->
+                    {noreply, State}
+            end;
+        _ ->
+            {noreply, State}
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -392,40 +413,51 @@ convert_return_value(Bits) ->
     end.
 
 
-probe_event_file(File, Acc) ->
-    io:format("probe_event_file(): ~s\n", [File]),
+probe_event_file(Directory, FileName, DeviceList) ->
+    Path = Directory ++ "/" ++ FileName,
 
     Port = open_port({spawn, ?INPEVT_DRIVER}, []),
 
-    { Res, ReplyID } = event_port_control(Port, ?IEDRV_CMD_PROBE, [File]),
+    { Res, ReplyID } = event_port_control(Port, ?IEDRV_CMD_PROBE, [Path]),
 
     case Res of
         ok ->
             receive
-                { device_info, _, ReplyID, X } ->
-                    io:format("Adding device ~w\n", [ X ]),
-                    [ #device{ port = Port, subscribers = [], dev_id = X} | Acc ]
+                { device_info, _, ReplyID, DrvDev } ->
+                    [ #device {
+                         port=Port,
+                         fname=FileName,
+                         subscribers = [],
+                         id=DrvDev#drv_dev_id.id,
+                         name=DrvDev#drv_dev_id.name,
+                         bus=DrvDev#drv_dev_id.bus,
+                         vendor=DrvDev#drv_dev_id.vendor,
+                         product=DrvDev#drv_dev_id.product,
+                         version=DrvDev#drv_dev_id.version,
+                         topology=DrvDev#drv_dev_id.topology,
+                         capabilities=DrvDev#drv_dev_id.capabilities
+                        } | DeviceList ]
             end;
         Res ->
-            io:format("Failed to retrieve info for ~s: ~w\n", [ File, Res]),
-            Acc
+            DeviceList
     end.
 
-match_and_probe_file(Directory, File, Acc) ->
-    case File of
-        "event" ++ _ ->
-            probe_event_file(Directory ++ "/" ++ File, Acc);
+match_and_probe_file(Directory, FileName, DeviceList) ->
+    case FileName of
+        ?INPEVT_PREFIX ++ _ ->
+            probe_event_file(Directory, FileName, DeviceList);
+
         _ ->
-            io:format("Nope: ~s\n", [ File ] ),
-            Acc
+            DeviceList
     end.
 
 
 scan_event_directory(Directory) ->
+    fnotify:watch(Directory),  %% Start subscribing to changes.
     case file:list_dir(Directory) of
         { ok, List } ->
-            Devices = lists:foldl(fun(File, Acc) ->
-                                          match_and_probe_file(Directory, File, Acc)
+            Devices = lists:foldl(fun(FileName, Acc) ->
+                                          match_and_probe_file(Directory, FileName, Acc)
                                   end,
                                   [],
                                   List),
@@ -441,54 +473,105 @@ scan_event_directory(Directory) ->
 %% First subscriber added to a device will activate the event port, thus starting the
 %% generation of devices.
 %%
-add_subscriber(Pid, Port, DevID, Subscribers, DevList) when Subscribers =:= [] ->
-    case activate_event_port(Port) of
+add_subscriber(Pid, Device, DevList) when Device#device.subscribers =:= [] ->
+    case activate_event_port(Device#device.port) of
         ok ->
-            {ok, [ #device { port=Port, subscribers = [ Pid | Subscribers ], dev_id = DevID }| DevList ] };
+            {ok, [ #device { %% CHECK - Can this be done more elegantly?
+                      port=Device#device.port,
+                      fname=Device#device.fname,
+                      id=Device#device.id,
+                      name=Device#device.name,
+                      bus=Device#device.bus,
+                      vendor=Device#device.vendor,
+                      product=Device#device.product,
+                      version=Device#device.version,
+                      topology=Device#device.topology,
+                      capabilities=Device#device.capabilities,
+                      subscribers = [ Pid ] } | DevList ] };
 
         {error, ErrCode } ->
             {error, ErrCode}
     end;
 
-add_subscriber(Pid, Port, DevID, Subscribers, DevList) when Subscribers =/= [] ->
-    {ok, [ #device { port=Port, subscribers = [ Pid | Subscribers ], dev_id = DevID }| DevList ] }.
+add_subscriber(Pid, Device, DevList) when Device#device.subscribers =/= [] ->
+    {ok, [ #device { %% CHECK - Can this be done more elegantly?
+              port=Device#device.port,
+              fname=Device#device.fname,
+              id=Device#device.id,
+              name=Device#device.name,
+              bus=Device#device.bus,
+              vendor=Device#device.vendor,
+              product=Device#device.product,
+              version=Device#device.version,
+              topology=Device#device.topology,
+              capabilities=Device#device.capabilities,
+              subscribers = [ Pid | Device#device.subscribers] } | DevList ] }.
 
 
-%% Remove the last subscriber.
-delete_subscriber(Port, Pid, DevID, [_] = Subscriber, DevList) ->
-    case lists:delete(Pid, Subscriber) of
-        [] ->
-            case deactivate_event_port(Port) of
-                ok->
-                    { ok,
-                      [ #device { port=Port, subscribers = [], dev_id = DevID } |
-                        DevList ] };
 
-                {error, ErrCode } ->
-                    {error, ErrCode}
+delete_subscriber(Pid, Device, DeviceList) ->
+
+    %% Is this the last subscriber to be removed
+    case Device#device.subscribers of
+        [_] ->
+            %% Try to delete the subscriber.
+            case lists:delete(Pid, Device#device.subscribers) of
+                %% Subscriber not found.
+                false ->
+                    { error, not_found };
+
+                %% Subscriber deleted
+                [] ->
+                    %% Deactiveate the event port so that we don't get handle_info
+                    %% called for this device.
+                    case deactivate_event_port(Device#device.port) of
+                        ok->
+                            { ok,
+                              [ #device { %% CHECK - Can this be done more elegantly?
+                                   port=Device#device.port,
+                                   fname=Device#device.fname,
+                                   id=Device#device.id,
+                                   name=Device#device.name,
+                                   bus=Device#device.bus,
+                                   vendor=Device#device.vendor,
+                                   product=Device#device.product,
+                                   version=Device#device.version,
+                                   topology=Device#device.topology,
+                                   capabilities=Device#device.capabilities,
+                                   subscribers = [] } | DeviceList ] };
+
+                        {error, ErrCode } ->
+                            {error, ErrCode}
+                    end
             end;
 
-        false ->
-                { error, not_found }
-        end;
+        %% We have more than one subscriber.
+        _ ->
+            %% Delete the subscriber.
+            case lists:delete(Pid, Device#device.subscribers) of
+                %% Subscriber not found
+                false ->
+                    { error, not_found };
 
-%% Remove subscriber from list greater than one
-delete_subscriber(Pid, Port,  DevID, [_|_] = Subscribers, DevList) ->
-   case lists:find(Pid, Subscribers) of
-       false ->
-           { error, not_found };
-
-       NewSubscribers ->
-           { ok,
-             [ #device { port=Port, subscribers = NewSubscribers, dev_id = DevID } |
-               DevList ] }
-        end.
-
-
+                %% Subscriber deleted.
+                NewSubscribers ->
+                    {ok, [ #device { %% CHECK - Can this be done more elegantly?
+                              port=Device#device.port,
+                              fname=Device#device.fname,
+                              id=Device#device.id,
+                              name=Device#device.name,
+                              bus=Device#device.bus,
+                              vendor=Device#device.vendor,
+                              product=Device#device.product,
+                              version=Device#device.version,
+                              topology=Device#device.topology,
+                              capabilities=Device#device.capabilities,
+                              subscribers = NewSubscribers } | DeviceList ] }
+            end
+    end.
 
 
 activate_event_port(Port) ->
-    io:format("activate_event_port(): ~p\n", [Port]),
     { Res, _ReplyID } = event_port_control(Port, ?IEDRV_CMD_OPEN, []),
     case Res of
         ok -> ok;
@@ -498,7 +581,6 @@ activate_event_port(Port) ->
 
 
 deactivate_event_port(Port) ->
-    io:format("deactivate_event_port(): ~p\n", [Port]),
 
     { Res, _ReplyID } = event_port_control(Port, ?IEDRV_CMD_CLOSE, []),
     case Res of
@@ -518,7 +600,6 @@ event_port_control(Port, Command, PortArg) ->
 
 
 get_devices(State) when State#state.devices =:= [] ->
-    io:format("get_devices([])\n"),
     process_flag(trap_exit, true),
     LoadRes = erl_ddll:load(code:priv_dir(inpevt), ?INPEVT_DRIVER),
 
@@ -580,14 +661,14 @@ get_devices(State, CapKey, CapSpec) ->
 
 
 filter_cap_key(Device, { CapKey, MatchingDevList }) ->
-    case proplists:is_defined(CapKey, Device#device.dev_id#dev_id.capabilities) of
+    case proplists:is_defined(CapKey, Device#device.capabilities) of
         true -> { CapKey, [ Device | MatchingDevList ] };
         false -> { CapKey, MatchingDevList }
     end.
 
 
 filter_cap_spec(Device, { CapKey, CapSpec, MatchingDevList }) ->
-    case proplists:get_value(CapKey, Device#device.dev_id#dev_id.capabilities) of
+    case proplists:get_value(CapKey, Device#device.capabilities) of
         undefined -> { CapKey, CapSpec, MatchingDevList };
         Match->
             case proplists:is_defined(CapSpec, Match) of
@@ -599,4 +680,60 @@ filter_cap_spec(Device, { CapKey, CapSpec, MatchingDevList }) ->
             end
 
     end.
+
+
+dispatch_event(Event, State) ->
+    case lists:keyfind(Event#input_event.port,
+                       #device.port,
+                       State#state.devices) of
+        false ->
+            not_found;
+        Device ->
+            lists:map(fun(Sub) -> Sub ! Event end, Device#device.subscribers),
+            found
+    end.
+
+
+add_new_device(Directory, FileName, State) ->
+    %% Dies the device already exist? If so just return.
+    case lists:keyfind(FileName,
+                       #device.fname,
+                       State#state.devices) of
+        %% Device does not exist, create.
+        false ->
+             #state {
+          devices = probe_event_file(Directory, FileName, State#state.devices)
+         };
+
+        %% Device
+        _ ->
+            State
+    end.
+
+delete_existing_device(FileName, State) ->
+    %% Locate the device
+    case lists:keytake(FileName,
+                       #device.fname,
+                       State#state.devices) of
+
+        %% Device does not exist, nop.
+        false ->
+            State;
+
+
+        %% We found the device. Close its port and remove it from state.
+        {value, Device, NewDeviceList } ->
+            lists:map(fun(Sub) ->
+                              Sub ! #removed_event { port = Device#device.port } end,
+                      Device#device.subscribers),
+            port_close(Device#device.port),
+            #state { devices = NewDeviceList }
+
+    end.
+
+
+
+
+
+
 

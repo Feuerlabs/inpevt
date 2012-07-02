@@ -111,7 +111,7 @@ static ErlDrvTermData ie_absinfo;
 static ErlDrvTermData ie_abs;
 static ErlDrvTermData ie_relative;
 static ErlDrvTermData ie_sync;
-static ErlDrvTermData ie_dev_id;
+static ErlDrvTermData ie_drv_dev_id;
 static ErlDrvTermData ie_capability;
 static ErlDrvTermData ie_name;
 static ErlDrvTermData ie_device_info;
@@ -785,7 +785,7 @@ static void setup_atoms(void)
     ie_absinfo = driver_mk_atom("abs_info");
     ie_sync = driver_mk_atom("sync");
     ie_relative = driver_mk_atom("relative");
-    ie_dev_id = driver_mk_atom("dev_id");
+    ie_drv_dev_id = driver_mk_atom("drv_dev_id");
     ie_capability = driver_mk_atom("capability");
     ie_name = driver_mk_atom("name");
     ie_device_info = driver_mk_atom("device_info");
@@ -896,6 +896,12 @@ static int inpevt_init(void)
 
 static void inpevt_stop (ErlDrvData drv_data)
 {
+    IEContext* ctx = 0;
+    ctx = (IEContext*) drv_data;
+    if (ctx && ctx->mDescriptor != -1) {
+        close(ctx->mDescriptor);
+        ctx->mDescriptor = -1;
+    }
     driver_free(drv_data);
 }
 
@@ -958,15 +964,13 @@ static ErlDrvSSizeT inpevt_control (ErlDrvData drv_data,
         close(ctx->mDescriptor);
         ctx->mDescriptor = -1;
 
-        **rbuf = IEDRV_RES_OK;
-        return 1;
+        return port_ctl_return_val(IEDRV_RES_OK, 0, *rbuf);
 
     default:
         break;
     }
 
     return port_ctl_return_val(IEDRV_RES_ILLEGAL_ARG, 0, *rbuf);
-    printf("inpevt_control(): Illegal command: 0x%X \r\n", command);
     return 1;
 }
 
@@ -980,7 +984,6 @@ static void inpevt_ready_input(ErlDrvData drv_data, ErlDrvEvent event)
     ctx = (IEContext*) drv_data;
 
     if (ctx->mDescriptor == -1) {
-        printf("inpevt_ready_input(): File not open\n\r");
         return;
     }
 
@@ -994,6 +997,7 @@ static void inpevt_ready_input(ErlDrvData drv_data, ErlDrvEvent event)
             dterm_init(&dt);
             dterm_tuple_begin(&dt, &ev_mark);
             dterm_atom(&dt, ie_input_event);
+            dterm_port(&dt, ctx->mDport);
             dterm_int(&dt, buf[i].time.tv_sec);
             dterm_int(&dt, buf[i].time.tv_usec);
             dterm_atom(&dt, *type_atoms[buf[i].type].atom);
@@ -1034,18 +1038,15 @@ static unsigned char send_device_info(IEContext* ctx, unsigned int reply_id)
     // Get device id.
     if (ioctl(ctx->mDescriptor, EVIOCGID, &id) < 0)
     {
-        printf("ioctl EVIOCGID failed: %s\n", strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
 
     if ((len = ioctl(ctx->mDescriptor, EVIOCGNAME(sizeof(name) - 1), name)) < 0) {
-        printf("ioctl EVIOCGNAME failed: %s\n", strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
     name[len] = 0;
 
     if ((len = ioctl(ctx->mDescriptor, EVIOCGPHYS(sizeof(topology) - 1), topology)) < 0) {
-        printf("ioctl EVIOCGPHYS failed: %s\n", strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
     topology[len] = 0;
@@ -1069,7 +1070,7 @@ static unsigned char send_device_info(IEContext* ctx, unsigned int reply_id)
         // Setup { id, Bustype, Vendor, Product, Version, Name}
         //
         dterm_tuple_begin(&dt, &prop); {
-            dterm_atom(&dt, ie_dev_id);
+            dterm_atom(&dt, ie_drv_dev_id);
             dterm_string(&dt, uniq_id, strlen(uniq_id));
             dterm_string(&dt, name, strlen(name));
             dterm_atom(&dt, *bus_atoms[id.bustype]);
@@ -1111,7 +1112,6 @@ static unsigned char open_event_device(IEContext* ctx)
 
     ctx->mDescriptor = open(ctx->mDevice, O_RDONLY | O_NONBLOCK);
     if (ctx->mDescriptor == -1) {
-        printf("Failed to open %s: %s\r\n", ctx->mDevice, strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
 
@@ -1138,7 +1138,6 @@ static unsigned char add_cap(dterm_t* dt, int fd)
 
     // Retrieve maste capabilities.
     if (ioctl(fd, EVIOCGBIT(0, sizeof(master_bitmask)), master_bitmask) < 0) {
-        printf("ioctl EVIOCGBIT failed: %s\n", strerror(errno));
         res = IEDRV_RES_IO_ERROR;
         goto end;
     }
@@ -1179,7 +1178,6 @@ static unsigned char add_key_cap(dterm_t* dt, int fd)
 
 
     if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bitmask)), bitmask) < 0) {
-        printf("ioctl EVIOCGBIT failed: %s\n", strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
 
@@ -1215,7 +1213,6 @@ static unsigned char add_abs_cap(dterm_t* dt, int fd)
 
 
     if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(bitmask)), bitmask) < 0) {
-        printf("ioctl EVIOCGBIT failed: %s\n", strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
 
@@ -1234,8 +1231,6 @@ static unsigned char add_abs_cap(dterm_t* dt, int fd)
             continue;
 
         if (ioctl(fd, EVIOCGABS(abs_cap_map[i].bit), &abs_info) < 0) {
-            printf("Could not grab abs info for [%s]: %s\n",
-                   abs_cap_map[i].name, strerror(errno));
             continue;
         }
 
@@ -1271,7 +1266,6 @@ static unsigned char add_rel_cap(dterm_t* dt, int fd)
 
 
     if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof(bitmask)), bitmask) < 0) {
-        printf("ioctl EVIOCGBIT failed: %s\n", strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
 

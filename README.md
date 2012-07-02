@@ -8,10 +8,7 @@ epx_nif.h
 { key_press, unicode(int)/atom(epx_nif.h), [ modifier (shift/graph/num/cap) ], key-code }
 When window opens (mapped).
 
+fnotify_srv:start().
 application:start(inpevt).
-{_, P, Cap} = inpevt:open("/dev/input/event0").
-
-application:start(inpevt).
-{_, P, Cap} = inpevt:open("/dev/input/event3").
-
-{_, P, Cap} = inpevt:open("/dev/input/event11"). mouse
+{_, [_, {_, P, _, _, _, _, _, _, _, _, _, _} | _ ] } = inpevt:get_devices(key, left).
+inpevt:subscribe(P, self()).
