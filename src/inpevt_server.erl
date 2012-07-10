@@ -19,101 +19,33 @@
 
 -define(SERVER, ?MODULE).
 
--record(syn,
-        {
-          element::atom(report) | atom(config) | atom(mt_report) | atom(mt_dropped),
-          unused_tuple
-        }).
+-record(syn, { element:: report | config | mt_report | mt_dropped }).
 
 
--record(key,
-        {
-          element::atom(), %% Too many keys to list.
-          key_code
-        }).
+-record(key, { key, code::integer() }).
 
 
--record(rel,
-        {
-          element::atom(x) | atom(y) | atom(z) | atom(rx)| atom(ry) | atom(rz) |
-          atom(hwheel) | atom(dial) | atom(wheel) | atom(misc),
-          unused_tuple
-        }).
+-record(rel, { element:: x | y | z | rx | ry | rz | hwheel | dial | wheel | misc }).
 
 
--record(absinfo, {
-          value::integer(),
-          minimum::integer(),
-          maximum::integer(),
-          fuzz::integer(),
-          flat::integer(),
-          resolution::integer()
-         }).
+-record(absinfo, { value::integer(), minimum::integer(), maximum::integer(),
+                   fuzz::integer(), flat::integer(), resolution::integer() }).
 
 
--record(abs,
-        {
-          element::atom(x) | atom(y) | atom(z) | atom(rx) | atom(ry) | atom(rz) |
-                   atom(throttle) | atom(rudder) | atom(wheel) | atom(gas) |
-                   atom(brake) | atom(hat0x) | atom(hat0y) | atom(hat1x) |
-                   atom(hat1y) | atom(hat2x) | atom(hat2y) | atom(hat3x) |
-                   atom(hat3y) | atom(pressure) | atom(distance) | atom(tilt_x) |
-                   atom(tilt_y) | atom(tool_width) | atom(volume) | atom(misc) |
-                   atom(mt_slot) | atom(mt_touch_major) | atom(mt_touch_minor) |
-                   atom(mt_width_major) | atom(mt_width_minor) | atom(mt_orientation) |
-                   atom(mt_position_x) | atom(mt_position_y) | atom(mt_tool_type) |
-                   atom(mt_blob_id) | atom(mt_tracking_id) | atom(mt_pressure) |
-                   atom(mt_distance),
-          spec::#absinfo{}
-        }).
+-record(abs, { element:: x | y | z | rx | ry | rz | throttle | rudder | wheel | gas |
+                         brake | hat0x | hat0y | hat1x | hat1y | hat2x | hat2y | hat3x |
+                         hat3y | pressure | distance | tilt_x | tilt_y | tool_width | volume | misc |
+                         mt_slot | mt_touch_major | mt_touch_minor | mt_width_major | mt_width_minor |
+                         mt_orientation | mt_position_x | mt_position_y | mt_tool_type | mt_blob_id |
+                         mt_tracking_id | mt_pressure | mt_distance,  spec::#absinfo{} }).
 
 
--record(sw, {
-          element::atom(lid) | atom(tablet_mode) | atom(headphone_insert) |
-                   atom(rfkill_all) | atom(radio) | atom(microphone_insert) |
-                   atom(dock) | atom(lineout_insert) | atom(jack_physical_insert) |
-                   atom(videoout_insert) | atom(camera_lens_cover) |
-                   atom(keypad_slide) | atom(front_proximity) | atom(rotate_lock) |
-                   atom(linein_insert),
-          unused_tuple
-         }).
+-record(sw, { element:: lid | tablet_mode | headphone_insert | rfkill_all | radio | microphone_insert |
+                        dock | lineout_insert | jack_physical_insert | videoout_insert |
+                        camera_lens_cover | keypad_slide | front_proximity | rotate_lock |
+                        linein_insert }).
 
-
-%% The following capabilities are not yet implemeneted in inpevt_driver.
-%% Live with the pain.
--record(led, {
-          element::atom(), unused_tuple
-         }).
-
--record(msc, {
-          element::atom(), unused_tuple
-         }).
-
--record(snd, {
-          element::atom(), unused_tuple
-         }).
-
--record(pwr, {
-          element::atom(), unused_tuple
-         }).
-
--record(ff, {
-          element::atom(), unused_tuple
-         }).
-
--record(rep, {
-          element::atom(), unused_tuple
-         }).
-
--record(ff_status, {
-          element::atom(), unused_tuple
-         }).
-
--record(cap_spec, {
-          element::#syn {} | #key {} | #rel {} | #abs {} |
-                        #msc {} | #sw {} | #led {} | #snd {} |
-                        #rep {} | #ff {} | #pwr {} | #ff_status {}
-         }).
+-record(cap_spec, { element::#syn {} | #key {} | #rel {} | #abs {} | #sw {} }).
 
 -record(drv_dev_id, {
           id::string(),
@@ -123,13 +55,18 @@
           product::integer(),
           version::integer(),
           topology::string(),
-          capabilities::list(#cap_spec{})
+          capabilities::[#cap_spec{}]
           }).
+
+-record(subscriber, {
+          pid::pid(), 
+          mref::reference()
+         }).
 
 -record(device, {
           port::port(),
           fname::string(),
-          subscribers = [] ::list(pid()),
+          subscribers::[#subscriber{}],
           id::string(),
           name::string(),
           bus::atom(),
@@ -137,12 +74,12 @@
           product::integer(),
           version::integer(),
           topology::string(),
-          capabilities::list(#cap_spec{})
+          capabilities::[#cap_spec{}]
           }).
 
 
 -record(state, {
-          devices = [] ::list(#device{})
+          devices = [] ::[#device{}]
          }).
 
 %% From /usr/include/linux/input.h
@@ -171,20 +108,22 @@
 -define (INPEVT_PREFIX, "event").
 
 
--spec activate_event_port(port()) -> ok|{error, illegal_arg | io_error | not_open}.
+-type port_result():: ok|{error, illegal_arg | io_error | not_open}.
+-spec activate_event_port(port()) -> port_result().
 
--spec deactivate_event_port(port()) -> ok|{error, illegal_arg | io_error | not_open}.
+-spec deactivate_event_port(port()) -> port_result().
 
--spec add_subscriber(pid(), #device {}, list(#device{})) ->
-                            { ok, list(#device{}) } |
+-spec add_subscriber(pid(), #device {}, [#device{}]) ->
+                            { ok, [#device{}] } |
                             {error, illegal_arg | io_error | not_open }.
 
--spec delete_subscriber(pid(), #device {}, list(#device{})) ->
-                               { ok , list(#device{}) } |
-                               { error, not_found | illegal_arg | io_error | not_open }.
+-spec delete_subscriber_from_port(pid(), port(), [#device{}]) -> [#device{}].
 
--spec filter_cap_key(#device {}, { string(), list(#device{})}) -> list(#device{}).
--spec filter_cap_spec(#device {}, { string(), list(#device{})}) -> list(#device{}).
+-spec delete_subscriber_from_device(pid(), #device{} ) -> #device{}.
+-spec delete_terminated_subscriber(pid(), [#device{}]) -> [#device{}].
+
+-spec filter_cap_key(#device {}, { string(), [#device{}]}) -> [#device{}].
+-spec filter_cap_spec(#device {}, { string(), [#device{}]}) -> [#device{}].
 
 
 %%%===================================================================
@@ -217,6 +156,7 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
+    process_flag(trap_exit, true),
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -265,30 +205,11 @@ handle_call({ subscribe, Port, Pid }, _From, State) ->
     end;
 
 handle_call({ unsubscribe, Port, Pid }, _From, State) ->
-
-    DevList = State#state.devices,
-    case lists:keytake(Port, #device.port, DevList) of
-        {
-          value,
-          Device,
-          TempDevList
-        } ->
-            {
-              reply,
-              ok,
-              #state {
-                devices = [ delete_subscriber(Pid,
-                                              Device,
-                                              TempDevList)
-                            | TempDevList ]
-               }
-            };
-
-        _ ->
-            { reply, not_found, State }
-    end;
-
-
+    { 
+      reply, 
+      ok, 
+      #state { devices = delete_subscriber_from_port(Pid, Port, State#state.devices) } 
+    };
 
 handle_call({ get_devices }, _From, State) ->
     get_devices(State);
@@ -351,7 +272,6 @@ handle_info(Info, State) ->
             dispatch_event(Info, State),
             {noreply, State};
 
-
         %% Since we are talking about simple USB detection here, we can probably
         %% expect the create atom to be the sole list member.
         { fevent, _, [ create ], Directory, FileName } ->
@@ -370,7 +290,18 @@ handle_info(Info, State) ->
                 _ ->
                     {noreply, State}
             end;
-        _ ->
+
+        %% Monitor trigger
+        { _, _, process, Pid, _ } ->
+            { 
+          noreply, 
+          #state { 
+            devices = delete_terminated_subscriber(Pid, State#state.devices) 
+           }
+        };
+
+        _X ->
+            io:format("handle_info(): ~p\n", [_X]),
             {noreply, State}
     end.
 
@@ -414,7 +345,7 @@ convert_return_value(Bits) ->
 
 
 probe_event_file(Directory, FileName, DeviceList) ->
-    Path = Directory ++ "/" ++ FileName,
+    Path = filename:join(Directory,FileName),
 
     Port = open_port({spawn, ?INPEVT_DRIVER}, []),
 
@@ -476,99 +407,73 @@ scan_event_directory(Directory) ->
 add_subscriber(Pid, Device, DevList) when Device#device.subscribers =:= [] ->
     case activate_event_port(Device#device.port) of
         ok ->
-            {ok, [ #device { %% CHECK - Can this be done more elegantly?
-                      port=Device#device.port,
-                      fname=Device#device.fname,
-                      id=Device#device.id,
-                      name=Device#device.name,
-                      bus=Device#device.bus,
-                      vendor=Device#device.vendor,
-                      product=Device#device.product,
-                      version=Device#device.version,
-                      topology=Device#device.topology,
-                      capabilities=Device#device.capabilities,
-                      subscribers = [ Pid ] } | DevList ] };
+            add_additional_subscribers(Pid, Device, DevList);
 
         {error, ErrCode } ->
             {error, ErrCode}
     end;
 
 add_subscriber(Pid, Device, DevList) when Device#device.subscribers =/= [] ->
-    {ok, [ #device { %% CHECK - Can this be done more elegantly?
-              port=Device#device.port,
-              fname=Device#device.fname,
-              id=Device#device.id,
-              name=Device#device.name,
-              bus=Device#device.bus,
-              vendor=Device#device.vendor,
-              product=Device#device.product,
-              version=Device#device.version,
-              topology=Device#device.topology,
-              capabilities=Device#device.capabilities,
-              subscribers = [ Pid | Device#device.subscribers] } | DevList ] }.
+    add_additional_subscribers(Pid, Device, DevList).
 
+add_additional_subscribers(Pid, Device, DevList) ->
+    MonitorRef = erlang:monitor(process, Pid),
+    {
+      ok, 
+      [ Device#device { 
+          subscribers = [ #subscriber{ pid = Pid, mref = MonitorRef } | 
+                          Device#device.subscribers] 
+         } | DevList ] 
+    }.
 
+delete_subscriber_from_port(Pid, Port, DeviceList) ->
+    case lists:keytake(Port, #device.port, DeviceList) of
+        {
+          value,
+          Device,
+          TempDevList
+        } ->
+            [ delete_subscriber_from_device(Pid, Device) | TempDevList ];
+     
+        _ ->
+            DeviceList
+    end.
+    
 
-delete_subscriber(Pid, Device, DeviceList) ->
-
+delete_subscriber_from_device(Pid, Device) ->
     %% Is this the last subscriber to be removed
     case Device#device.subscribers of
-        [_] ->
-            %% Try to delete the subscriber.
-            case lists:delete(Pid, Device#device.subscribers) of
-                %% Subscriber not found.
-                false ->
-                    { error, not_found };
-
-                %% Subscriber deleted
-                [] ->
-                    %% Deactiveate the event port so that we don't get handle_info
-                    %% called for this device.
-                    case deactivate_event_port(Device#device.port) of
-                        ok->
-                            { ok,
-                              [ #device { %% CHECK - Can this be done more elegantly?
-                                   port=Device#device.port,
-                                   fname=Device#device.fname,
-                                   id=Device#device.id,
-                                   name=Device#device.name,
-                                   bus=Device#device.bus,
-                                   vendor=Device#device.vendor,
-                                   product=Device#device.product,
-                                   version=Device#device.version,
-                                   topology=Device#device.topology,
-                                   capabilities=Device#device.capabilities,
-                                   subscribers = [] } | DeviceList ] };
-
-                        {error, ErrCode } ->
-                            {error, ErrCode}
-                    end
-            end;
+        [Subscriber] ->
+            %% Deactiveate the event port so that we don't get handle_info
+            %% called for this device.
+            demonitor(Subscriber#subscriber.mref),
+            deactivate_event_port(Device#device.port),
+            Device#device { subscribers = [] };
 
         %% We have more than one subscriber.
         _ ->
             %% Delete the subscriber.
-            case lists:delete(Pid, Device#device.subscribers) of
+            case lists:keytake(Pid, #subscriber.pid, Device#device.subscribers) of
                 %% Subscriber not found
                 false ->
-                    { error, not_found };
+                    Device;
 
                 %% Subscriber deleted.
-                NewSubscribers ->
-                    {ok, [ #device { %% CHECK - Can this be done more elegantly?
-                              port=Device#device.port,
-                              fname=Device#device.fname,
-                              id=Device#device.id,
-                              name=Device#device.name,
-                              bus=Device#device.bus,
-                              vendor=Device#device.vendor,
-                              product=Device#device.product,
-                              version=Device#device.version,
-                              topology=Device#device.topology,
-                              capabilities=Device#device.capabilities,
-                              subscribers = NewSubscribers } | DeviceList ] }
+                {
+                  value,
+                  Subscriber,
+                  Remainder
+                } ->
+                    demonitor(Subscriber#subscriber.mref),
+                    Device#device { subscribers = Remainder }
             end
     end.
+
+%% Delete a subscriber from all ports in State
+delete_terminated_subscriber(Pid, DeviceList) ->
+    [ delete_subscriber_from_device(Pid, Device) || Device <- DeviceList ].
+
+
 
 
 activate_event_port(Port) ->
@@ -600,7 +505,6 @@ event_port_control(Port, Command, PortArg) ->
 
 
 get_devices(State) when State#state.devices =:= [] ->
-    process_flag(trap_exit, true),
     LoadRes = erl_ddll:load(code:priv_dir(inpevt), ?INPEVT_DRIVER),
 
     if LoadRes =:= ok;
@@ -689,7 +593,8 @@ dispatch_event(Event, State) ->
         false ->
             not_found;
         Device ->
-            lists:map(fun(Sub) -> Sub ! Event end, Device#device.subscribers),
+            lists:map(fun(Sub) -> Sub#subscriber.pid ! Event end, 
+                      Device#device.subscribers),
             found
     end.
 
@@ -724,7 +629,7 @@ delete_existing_device(FileName, State) ->
         %% We found the device. Close its port and remove it from state.
         {value, Device, NewDeviceList } ->
             lists:map(fun(Sub) ->
-                              Sub ! #removed_event { port = Device#device.port } end,
+                              Sub#subscriber.pid ! #removed_event { port = Device#device.port } end,
                       Device#device.subscribers),
             port_close(Device#device.port),
             #state { devices = NewDeviceList }

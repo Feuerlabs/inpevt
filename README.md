@@ -12,3 +12,5 @@ fnotify_srv:start().
 application:start(inpevt).
 {_, [_, {_, P, _, _, _, _, _, _, _, _, _, _} | _ ] } = inpevt:get_devices(key, left).
 inpevt:subscribe(P, self()).
+inpevt:unsubscribe(P, self()).
+spawn(fun() -> inpevt:subscribe(P, self()), receive X -> X after 2000 -> io:format("Exit\n", []), exit(normal) end end).
