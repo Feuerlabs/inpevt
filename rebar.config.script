@@ -1,0 +1,40 @@
+ %% -*- erlang -*-
+CONFIG=[{erl_opts,[debug_info,fail_on_warning]},
+ {port_specs,[{"priv/inpevt_driver.so",["c_src/*.c"]}]}].
+case os:getenv("REBAR_DEPS") of
+    false -> Cfg1 = CONFIG;
+    [] -> Cfg1 = CONFIG;
+    Dir ->
+	Cfg1 = lists:keystore(deps_dir, 1, CONFIG, {deps_dir, Dir})
+end,
+
+%%
+%% If x-comp-target-arch, x-comp-erlang-root and x-comp-toolchain-root is set,
+%% Setup the environment for cross compilation, else just return Cfg1.
+%%
+TargetArch = rebar_config:get_global('x-comp-target-arch', undefined),
+ErlRoot = rebar_config:get_global('x-comp-erlang-root', undefined),
+ToolChainRoot = rebar_config:get_global('x-comp-toolchain-root', undefined),
+if ToolChainRoot =/= undefined, 
+   ErlRoot =/= undefined,
+   TargetArch =/= undefined ->
+        ErtsInclude = filename:join(ErlRoot, "lib/erlang/usr/include"),
+        ErtsLibPath = filename:join(ErlRoot, "lib/erlang/lib"),
+        CFlags = rebar_config:get_global('x-comp-c-flags', ""),
+        LdFlags = rebar_config:get_global('x-comp-ld-flags', ""),
+
+        lists:keystore(port_env, 1, Cfg1, 
+                       { port_env, [ {"CFLAGS", "$CFLAGS -fPIC -I" ++ ErtsInclude ++ " " ++ CFlags }, 
+                                     {"LDFLAGS", "$LDFLAGS -L" ++ ErtsLibPath ++ " " ++ LdFlags }, 
+                                     {"CC", filename:join(ToolChainRoot, 
+                                                          filename:join("bin", TargetArch ++ "-gcc")) },
+                                     {"LD", filename:join(ToolChainRoot, 
+                                                          filename:join("bin", TargetArch ++ "-ld")) },
+                                     {"ERL_LDFLAGS", "" },
+                                     {"ERL_CFLAGS", "-g" }
+                                   ]
+                       }
+                      );
+   true ->
+        Cfg1
+end.

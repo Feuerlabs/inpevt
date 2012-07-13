@@ -147,8 +147,8 @@ static struct AtomNameBitMap bus_cap_map[] = {
     { BUS_I2C, "i2c", 0 },
     { BUS_HOST, "host", 0 },
     { BUS_GSC, "gsc", 0 },
-    { BUS_ATARI, "atari", 0 },
-    { BUS_SPI, "spi", 0 }
+//    { BUS_ATARI, "atari", 0 },
+//    { BUS_SPI, "spi", 0 }
 };
 static ErlDrvTermData* bus_atoms[0x1C + 1]; // No BUS_MAX. Picked from BUS_XXX in input.h
 
@@ -176,17 +176,20 @@ static struct {
 static struct AtomNameBitMap sync_cap_map[] = {
     { SYN_REPORT, "report", 0 },
     { SYN_CONFIG, "config", 0 },
+#if __i386__ && __linux__
     { SYN_MT_REPORT, "mt_report", 0 },
     { SYN_DROPPED, "dropped", 0 }
+#endif // __i386__ && __linux__
 };
 
-static ErlDrvTermData* sync_atoms[4]; // No TYPE_MAX
 
+static ErlDrvTermData* sync_atoms[4]; // No TYPE_MAX
 
 static struct AtomNameBitMap sw_cap_map[] = {
     { SW_LID, "lid", 0 },
     { SW_TABLET_MODE, "tablet_mode", 0 },
     { SW_HEADPHONE_INSERT, "headphone_insert", 0 },
+#if __i386__ && __linux__
     { SW_RFKILL_ALL, "rfkill_all", 0 },
     { SW_RADIO, "radio", 0 },
     { SW_MICROPHONE_INSERT, "microphone_insert", 0 },
@@ -199,6 +202,7 @@ static struct AtomNameBitMap sw_cap_map[] = {
     { SW_FRONT_PROXIMITY, "front_proximity", 0 },
     { SW_ROTATE_LOCK, "rotate_lock", 0 },
     { SW_LINEIN_INSERT, "linein_insert", 0 },
+#endif // __i386__ && __linux__
 };
 
 static ErlDrvTermData* sw_atoms[SW_MAX + 1];
@@ -245,6 +249,7 @@ static struct AtomNameBitMap abs_cap_map[] = {
     { ABS_TOOL_WIDTH, "tool_width", 0},
     { ABS_VOLUME, "volume", 0},
     { ABS_MISC, "misc", 0},
+#if __i386__ && __linux__
     { ABS_MT_SLOT, "mt_slot", 0},
     { ABS_MT_TOUCH_MAJOR, "mt_touch_major", 0},
     { ABS_MT_TOUCH_MINOR, "mt_touch_minor", 0},
@@ -258,6 +263,7 @@ static struct AtomNameBitMap abs_cap_map[] = {
     { ABS_MT_TRACKING_ID, "mt_tracking_id", 0},
     { ABS_MT_PRESSURE, "mt_pressure", 0},
     { ABS_MT_DISTANCE, "mt_distance", 0}
+#endif // __i386__ && __linux__
 };
 
 static ErlDrvTermData* abs_atoms[ABS_MAX + 1];
@@ -382,7 +388,6 @@ static struct AtomNameBitMap key_cap_map[] = {
     { KEY_KPEQUAL, "kpequal", 0 },
     { KEY_KPPLUSMINUS, "kpplusminus", 0 },
     { KEY_PAUSE, "pause", 0 },
-    { KEY_SCALE, "scale", 0 },
     { KEY_KPCOMMA, "kpcomma", 0 },
     { KEY_HANGEUL, "hangeul", 0 },
     { KEY_HANGUEL, "hanguel", 0 },
@@ -416,7 +421,6 @@ static struct AtomNameBitMap key_cap_map[] = {
     { KEY_WWW, "www", 0 },
     { KEY_MSDOS, "msdos", 0 },
     { KEY_COFFEE, "coffee", 0 },
-    { KEY_SCREENLOCK, "screenlock", 0 },
     { KEY_DIRECTION, "direction", 0 },
     { KEY_CYCLEWINDOWS, "cyclewindows", 0 },
     { KEY_MAIL, "mail", 0 },
@@ -463,7 +467,6 @@ static struct AtomNameBitMap key_cap_map[] = {
     { KEY_PAUSECD, "pausecd", 0 },
     { KEY_PROG3, "prog3", 0 },
     { KEY_PROG4, "prog4", 0 },
-    { KEY_DASHBOARD, "dashboard", 0 },
     { KEY_SUSPEND, "suspend", 0 },
     { KEY_CLOSE, "close", 0 },
     { KEY_PLAY, "play", 0 },
@@ -498,16 +501,7 @@ static struct AtomNameBitMap key_cap_map[] = {
     { KEY_BATTERY, "battery", 0 },
     { KEY_BLUETOOTH, "bluetooth", 0 },
     { KEY_WLAN, "wlan", 0 },
-    { KEY_UWB, "uwb", 0 },
     { KEY_UNKNOWN, "unknown", 0 },
-    { KEY_VIDEO_NEXT, "video_next", 0 },
-    { KEY_VIDEO_PREV, "video_prev", 0 },
-    { KEY_BRIGHTNESS_CYCLE, "brightness_cycle", 0 },
-    { KEY_BRIGHTNESS_ZERO, "brightness_zero", 0 },
-    { KEY_DISPLAY_OFF, "display_off", 0 },
-    { KEY_WIMAX, "wimax", 0 },
-    { KEY_RFKILL, "rfkill", 0 },
-    { KEY_MICMUTE, "micmute", 0 },
     { BTN_MISC, "misc", 0 },
     { BTN_0, "0", 0 },
     { BTN_1, "1", 0 },
@@ -567,13 +561,11 @@ static struct AtomNameBitMap key_cap_map[] = {
     { BTN_TOOL_FINGER, "tool_finger", 0 },
     { BTN_TOOL_MOUSE, "tool_mouse", 0 },
     { BTN_TOOL_LENS, "tool_lens", 0 },
-    { BTN_TOOL_QUINTTAP, "tool_quinttap", 0 },
     { BTN_TOUCH, "touch", 0 },
     { BTN_STYLUS, "stylus", 0 },
     { BTN_STYLUS2, "stylus2", 0 },
     { BTN_TOOL_DOUBLETAP, "tool_doubletap", 0 },
     { BTN_TOOL_TRIPLETAP, "tool_tripletap", 0 },
-    { BTN_TOOL_QUADTAP, "tool_quadtap", 0 },
     { BTN_WHEEL, "wheel", 0 },
     { BTN_GEAR_DOWN, "gear_down", 0 },
     { BTN_GEAR_UP, "gear_up", 0 },
@@ -656,18 +648,6 @@ static struct AtomNameBitMap key_cap_map[] = {
     { KEY_VOICEMAIL, "voicemail", 0 },
     { KEY_ADDRESSBOOK, "addressbook", 0 },
     { KEY_MESSENGER, "messenger", 0 },
-    { KEY_DISPLAYTOGGLE, "displaytoggle", 0 },
-    { KEY_SPELLCHECK, "spellcheck", 0 },
-    { KEY_LOGOFF, "logoff", 0 },
-    { KEY_DOLLAR, "dollar", 0 },
-    { KEY_EURO, "euro", 0 },
-    { KEY_FRAMEBACK, "frameback", 0 },
-    { KEY_FRAMEFORWARD, "frameforward", 0 },
-    { KEY_CONTEXT_MENU, "context_menu", 0 },
-    { KEY_MEDIA_REPEAT, "media_repeat", 0 },
-    { KEY_10CHANNELSUP, "10channelsup", 0 },
-    { KEY_10CHANNELSDOWN, "10channelsdown", 0 },
-    { KEY_IMAGES, "images", 0 },
     { KEY_DEL_EOL, "del_eol", 0 },
     { KEY_DEL_EOS, "del_eos", 0 },
     { KEY_INS_LINE, "ins_line", 0 },
@@ -701,6 +681,33 @@ static struct AtomNameBitMap key_cap_map[] = {
     { KEY_BRL_DOT6, "brl_dot6", 0 },
     { KEY_BRL_DOT7, "brl_dot7", 0 },
     { KEY_BRL_DOT8, "brl_dot8", 0 },
+#if __i386__ && __linux__
+    { KEY_SCALE, "scale", 0 },
+    { KEY_SCREENLOCK, "screenlock", 0 },
+    { KEY_DASHBOARD, "dashboard", 0 },
+    { KEY_UWB, "uwb", 0 },
+    { KEY_VIDEO_NEXT, "video_next", 0 },
+    { KEY_VIDEO_PREV, "video_prev", 0 },
+    { KEY_BRIGHTNESS_CYCLE, "brightness_cycle", 0 },
+    { KEY_BRIGHTNESS_ZERO, "brightness_zero", 0 },
+    { KEY_DISPLAY_OFF, "display_off", 0 },
+    { KEY_WIMAX, "wimax", 0 },
+    { KEY_RFKILL, "rfkill", 0 },
+    { KEY_MICMUTE, "micmute", 0 },
+    { BTN_TOOL_QUINTTAP, "tool_quinttap", 0 },
+    { BTN_TOOL_QUADTAP, "tool_quadtap", 0 },
+    { KEY_DISPLAYTOGGLE, "displaytoggle", 0 },
+    { KEY_SPELLCHECK, "spellcheck", 0 },
+    { KEY_LOGOFF, "logoff", 0 },
+    { KEY_DOLLAR, "dollar", 0 },
+    { KEY_EURO, "euro", 0 },
+    { KEY_FRAMEBACK, "frameback", 0 },
+    { KEY_FRAMEFORWARD, "frameforward", 0 },
+    { KEY_CONTEXT_MENU, "context_menu", 0 },
+    { KEY_MEDIA_REPEAT, "media_repeat", 0 },
+    { KEY_10CHANNELSUP, "10channelsup", 0 },
+    { KEY_10CHANNELSDOWN, "10channelsdown", 0 },
+    { KEY_IMAGES, "images", 0 },
     { KEY_BRL_DOT9, "brl_dot9", 0 },
     { KEY_BRL_DOT10, "brl_dot10", 0 },
     { KEY_NUMERIC_0, "numeric_0", 0 },
@@ -767,6 +774,7 @@ static struct AtomNameBitMap key_cap_map[] = {
     { BTN_TRIGGER_HAPPY38, "trigger_happy38", 0 },
     { BTN_TRIGGER_HAPPY39, "trigger_happy39", 0 },
     { BTN_TRIGGER_HAPPY40, "trigger_happy40", 0 }
+#endif // __i386__ && __linux__
 };
 static ErlDrvTermData* key_atoms[KEY_MAX + 1];
 
@@ -809,7 +817,9 @@ static ErlDrvData inpevt_start(ErlDrvPort port, char *command)
 
 static int inpevt_init(void)
 {
+
     int i = 0;
+    puts("inpevt_init()");
 
     setup_atoms();
 
@@ -919,11 +929,13 @@ static ErlDrvSSizeT inpevt_control (ErlDrvData drv_data,
     static unsigned int reply_id = 0;
     unsigned char res = 0;
 
+    puts("inpevt_control()");
     ctx = (IEContext*) drv_data;
 
     switch(command & IEDRV_CMD_MASK) {
     case IEDRV_CMD_PROBE:
     {
+        puts("  probe()");
         // Make a stack copy of buf so that we can add a null.
         if (len > sizeof(ctx->mDevice) - 1) {
             // Avoid overflow.
@@ -948,6 +960,7 @@ static ErlDrvSSizeT inpevt_control (ErlDrvData drv_data,
 
     case IEDRV_CMD_OPEN:
     {
+        puts("  open()");
         if ((res = open_event_device(ctx)) != IEDRV_RES_OK)
             return port_ctl_return_val(res, 0, *rbuf);
 
@@ -957,6 +970,7 @@ static ErlDrvSSizeT inpevt_control (ErlDrvData drv_data,
 
     // Are we closing?
     case IEDRV_CMD_CLOSE:
+        puts("  close()");
         // Remove from select set.
         if (ctx->mDescriptor != -1)
             driver_select(ctx->mPort, (ErlDrvEvent) ctx->mDescriptor, DO_READ, 0);
@@ -1172,6 +1186,9 @@ static unsigned char add_key_cap(dterm_t* dt, int fd)
 {
     dterm_mark_t prop;
     dterm_mark_t c_list;
+#ifndef KEY_CNT
+#define KEY_CNT KEY_UNKNOWN
+#endif
     unsigned char bitmask[KEY_CNT / 8 + 1];
 
     int i = 0;
@@ -1244,7 +1261,7 @@ static unsigned char add_abs_cap(dterm_t* dt, int fd)
             dterm_int(dt, abs_info.maximum);
             dterm_int(dt, abs_info.fuzz);
             dterm_int(dt, abs_info.flat);
-            dterm_int(dt, abs_info.resolution);
+//            dterm_int(dt, abs_info.resolution);  // Not available in ARM7
             dterm_tuple_end(dt, &cap_tuple);
         }
         dterm_tuple_end(dt, &a_prop);
@@ -1261,7 +1278,12 @@ static unsigned char add_rel_cap(dterm_t* dt, int fd)
 {
     dterm_mark_t prop;
     dterm_mark_t c_list;
-    unsigned char bitmask[REL_CNT / 8 + 1];
+
+#ifndef REL_CNT
+#define REL_CNT REL_MAX
+#endif
+
+    unsigned char bitmask[REL_MAX / 8 + 1];
     int i = 0;
 
 
@@ -1294,6 +1316,9 @@ static unsigned char add_switch_cap(dterm_t* dt, int fd)
 {
     dterm_mark_t prop;
     dterm_mark_t c_list;
+#ifndef SW_CNT
+#define SW_CNT SW_MAX
+#endif
     unsigned char bitmask[SW_CNT / 8 + 1];
     int i = 0;
 

@@ -59,7 +59,7 @@
           }).
 
 -record(subscriber, {
-          pid::pid(), 
+          pid::pid(),
           mref::reference()
          }).
 
@@ -106,6 +106,7 @@
 -define (INPEVT_DRIVER, "inpevt_driver").
 -define (INPEVT_DIRECTORY, "/dev/input").
 -define (INPEVT_PREFIX, "event").
+-define (INPEVT_TOUCHSCREEN, "touchscreen").
 
 
 -type port_result():: ok|{error, illegal_arg | io_error | not_open}.
@@ -205,10 +206,10 @@ handle_call({ subscribe, Port, Pid }, _From, State) ->
     end;
 
 handle_call({ unsubscribe, Port, Pid }, _From, State) ->
-    { 
-      reply, 
-      ok, 
-      #state { devices = delete_subscriber_from_port(Pid, Port, State#state.devices) } 
+    {
+      reply,
+      ok,
+      #state { devices = delete_subscriber_from_port(Pid, Port, State#state.devices) }
     };
 
 handle_call({ get_devices }, _From, State) ->
@@ -278,6 +279,10 @@ handle_info(Info, State) ->
             case FileName of
                ?INPEVT_PREFIX ++ _ ->
                     { noreply, add_new_device(Directory, FileName, State) };
+
+               ?INPEVT_TOUCHSCREEN ++ _ ->
+                    { noreply, add_new_device(Directory, FileName, State) };
+
                 _ ->
                     { noreply, State }
             end;
@@ -287,16 +292,19 @@ handle_info(Info, State) ->
                ?INPEVT_PREFIX ++ _ ->
                     { noreply, delete_existing_device(FileName, State) };
 
+               ?INPEVT_TOUCHSCREEN ++ _ ->
+                    { noreply, delete_existing_device(FileName, State) };
+
                 _ ->
                     {noreply, State}
             end;
 
         %% Monitor trigger
         { _, _, process, Pid, _ } ->
-            { 
-          noreply, 
-          #state { 
-            devices = delete_terminated_subscriber(Pid, State#state.devices) 
+            {
+          noreply,
+          #state {
+            devices = delete_terminated_subscriber(Pid, State#state.devices)
            }
         };
 
@@ -378,13 +386,18 @@ match_and_probe_file(Directory, FileName, DeviceList) ->
         ?INPEVT_PREFIX ++ _ ->
             probe_event_file(Directory, FileName, DeviceList);
 
+        ?INPEVT_TOUCHSCREEN ++ _ ->
+            probe_event_file(Directory, FileName, DeviceList);
+
         _ ->
+            io:fwrite("No match on: ~p\n", [?INPEVT_PREFIX]),
             DeviceList
     end.
 
 
 scan_event_directory(Directory) ->
     fnotify:watch(Directory),  %% Start subscribing to changes.
+    io:fwrite("Scanning: ~p\n", [Directory]),
     case file:list_dir(Directory) of
         { ok, List } ->
             Devices = lists:foldl(fun(FileName, Acc) ->
@@ -419,11 +432,11 @@ add_subscriber(Pid, Device, DevList) when Device#device.subscribers =/= [] ->
 add_additional_subscribers(Pid, Device, DevList) ->
     MonitorRef = erlang:monitor(process, Pid),
     {
-      ok, 
-      [ Device#device { 
-          subscribers = [ #subscriber{ pid = Pid, mref = MonitorRef } | 
-                          Device#device.subscribers] 
-         } | DevList ] 
+      ok,
+      [ Device#device {
+          subscribers = [ #subscriber{ pid = Pid, mref = MonitorRef } |
+                          Device#device.subscribers]
+         } | DevList ]
     }.
 
 delete_subscriber_from_port(Pid, Port, DeviceList) ->
@@ -434,11 +447,11 @@ delete_subscriber_from_port(Pid, Port, DeviceList) ->
           TempDevList
         } ->
             [ delete_subscriber_from_device(Pid, Device) | TempDevList ];
-     
+
         _ ->
             DeviceList
     end.
-    
+
 
 delete_subscriber_from_device(Pid, Device) ->
     %% Is this the last subscriber to be removed
@@ -593,7 +606,7 @@ dispatch_event(Event, State) ->
         false ->
             not_found;
         Device ->
-            lists:map(fun(Sub) -> Sub#subscriber.pid ! Event end, 
+            lists:map(fun(Sub) -> Sub#subscriber.pid ! Event end,
                       Device#device.subscribers),
             found
     end.
