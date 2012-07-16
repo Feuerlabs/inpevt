@@ -1,6 +1,4 @@
  %% -*- erlang -*-
-CONFIG=[{erl_opts,[debug_info,fail_on_warning]},
- {port_specs,[{"priv/inpevt_driver.so",["c_src/*.c"]}]}].
 case os:getenv("REBAR_DEPS") of
     false -> Cfg1 = CONFIG;
     [] -> Cfg1 = CONFIG;
@@ -9,19 +7,25 @@ case os:getenv("REBAR_DEPS") of
 end,
 
 %%
-%% If x-comp-target-arch, x-comp-erlang-root and x-comp-toolchain-root is set,
+%% If X_COMP_TARGE_ARCH, X_COMP_ERLANG_ROOT and X_COMP_TOOLCHAIN_ROOT is set,
 %% Setup the environment for cross compilation, else just return Cfg1.
 %%
-TargetArch = rebar_config:get_global('x-comp-target-arch', undefined),
-ErlRoot = rebar_config:get_global('x-comp-erlang-root', undefined),
-ToolChainRoot = rebar_config:get_global('x-comp-toolchain-root', undefined),
-if ToolChainRoot =/= undefined, 
-   ErlRoot =/= undefined,
-   TargetArch =/= undefined ->
+TargetArch = os:getenv("X_COMP_TARGET_ARCH"),
+ErlRoot = os:getenv("X_COMP_OTP_ROOT"),
+ToolChainRoot = os:getenv("X_COMP_TOOLCHAIN_ROOT"),
+if ToolChainRoot =/= false, 
+   ErlRoot =/= false,
+   TargetArch =/= false ->
         ErtsInclude = filename:join(ErlRoot, "lib/erlang/usr/include"),
         ErtsLibPath = filename:join(ErlRoot, "lib/erlang/lib"),
-        CFlags = rebar_config:get_global('x-comp-c-flags', ""),
-        LdFlags = rebar_config:get_global('x-comp-ld-flags', ""),
+        case os:getenv("X_COMP_C_FLAGS") of
+            false -> CFlags = "";
+            CFlags -> true
+        end,
+        case os:getenv("X_COMP_LD_FLAGS") of
+            false -> LdFlags = "";
+            LdFlags -> true
+        end,
 
         lists:keystore(port_env, 1, Cfg1, 
                        { port_env, [ {"CFLAGS", "$CFLAGS -fPIC -I" ++ ErtsInclude ++ " " ++ CFlags }, 
@@ -38,3 +42,6 @@ if ToolChainRoot =/= undefined,
    true ->
         Cfg1
 end.
+
+
+
