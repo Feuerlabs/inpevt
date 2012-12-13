@@ -24,6 +24,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([add_device/1]).
+
 -define(SERVER, ?MODULE).
 
 -record(syn, { element:: report | config | mt_report | mt_dropped }).
@@ -165,7 +167,16 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     process_flag(trap_exit, true),
-    {ok, #state{}}.
+    io:fwrite("priv: ~p~n", [code:priv_dir(inpevt)]),
+    Res = erl_ddll:load(code:priv_dir(inpevt), ?INPEVT_DRIVER),
+    io:fwrite("Res: ~p~n", [Res]),
+    case Res of
+	 ok -> {ok, #state{}};
+	{ _error, Error } -> { stop, Error };
+	_ -> { stop, unknown }
+
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -222,12 +233,18 @@ handle_call({ unsubscribe, Port, Pid }, _From, State) ->
 handle_call({ get_devices }, _From, State) ->
     get_devices(State);
 
-
 handle_call({ get_devices, CapKey }, _From, State) ->
     get_devices(State, CapKey);
 
 handle_call({ get_devices, CapKey, CapSpec }, _From, State) ->
     get_devices(State, CapKey, CapSpec);
+
+handle_call({ add_device, FileName }, _From, State) ->
+    io:fwrite("FileName: ~p~n", [FileName]),
+    add_new_device(filename:dirname(FileName),
+		   filename:basename(FileName),
+		   State);
+
 
 
 %%--------------------------------------------------------------------
@@ -349,6 +366,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+add_device(FileName) ->
+    gen_server:call(?SERVER, { add_device, FileName }).
 
 convert_return_value(Bits) ->
     if Bits =:= ?IEDRV_RES_OK -> ok;
@@ -525,20 +545,16 @@ event_port_control(Port, Command, PortArg) ->
 
 
 get_devices(State) when State#state.devices =:= [] ->
-    LoadRes = erl_ddll:load(code:priv_dir(inpevt), ?INPEVT_DRIVER),
+    {Result, Devices } = scan_event_directory(?INPEVT_DIRECTORY),
+    case Result of
+	ok ->
+	    { reply, { ok, Devices }, #state { devices = Devices } };
 
-    if LoadRes =:= ok;
-       LoadRes =:= { error, already_loaded } ->
-            {Result, Devices } = scan_event_directory(?INPEVT_DIRECTORY),
-            case Result of
-                ok ->
-                    { reply, { ok, Devices }, #state { devices = Devices } };
-
-                _ ->
-                    { reply, Result, State }
-            end;
-       true -> { reply, LoadRes, State }
+	_ ->
+	    { reply, Result, State }
     end;
+
+
 
 
 get_devices(State) when State#state.devices =/= [] ->
@@ -617,6 +633,7 @@ dispatch_event(Event, State) ->
                       Device#device.subscribers),
             found
     end.
+
 
 
 add_new_device(Directory, FileName, State) ->
