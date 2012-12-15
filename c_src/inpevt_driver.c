@@ -102,6 +102,7 @@ static ErlDrvEntry inpevt_driver_entry = {
 #define IEDRV_RES_IO_ERROR 1
 #define IEDRV_RES_NOT_OPEN 2
 #define IEDRV_RES_ILLEGAL_ARG 3
+#define IEDRV_RES_COULD_NOT_OPEN 4
 
 #define LONG_BITS (sizeof(long) * sizeof(char))
 #define NLONGS(x) (((x) + LONG_BITS - 1) / LONG_BITS)
@@ -823,7 +824,6 @@ static int inpevt_init(void)
 {
 
     int i = 0;
-    puts("inpevt_init()");
 
     setup_atoms();
 
@@ -933,13 +933,11 @@ static ErlDrvSSizeT inpevt_control (ErlDrvData drv_data,
     static unsigned int reply_id = 0;
     unsigned char res = 0;
 
-    puts("inpevt_control()");
     ctx = (IEContext*) drv_data;
 
     switch(command & IEDRV_CMD_MASK) {
     case IEDRV_CMD_PROBE:
     {
-        puts("  probe()");
         // Make a stack copy of buf so that we can add a null.
         if (len > sizeof(ctx->mDevice) - 1) {
             // Avoid overflow.
@@ -964,7 +962,6 @@ static ErlDrvSSizeT inpevt_control (ErlDrvData drv_data,
 
     case IEDRV_CMD_OPEN:
     {
-        puts("  open()");
         if ((res = open_event_device(ctx)) != IEDRV_RES_OK)
             return port_ctl_return_val(res, 0, *rbuf);
 
@@ -974,7 +971,6 @@ static ErlDrvSSizeT inpevt_control (ErlDrvData drv_data,
 
     // Are we closing?
     case IEDRV_CMD_CLOSE:
-        puts("  close()");
         // Remove from select set.
         if (ctx->mDescriptor != -1)
             driver_select(ctx->mPort, (ErlDrvEvent) ctx->mDescriptor, DO_READ, 0);
@@ -1130,7 +1126,7 @@ static unsigned char open_event_device(IEContext* ctx)
 
     ctx->mDescriptor = open(ctx->mDevice, O_RDONLY | O_NONBLOCK);
     if (ctx->mDescriptor == -1) {
-        return IEDRV_RES_IO_ERROR;
+        return IEDRV_RES_COULD_NOT_OPEN;
     }
 
     return IEDRV_RES_OK;
@@ -1327,7 +1323,6 @@ static unsigned char add_switch_cap(dterm_t* dt, int fd)
     int i = 0;
 
     if (ioctl(fd, EVIOCGBIT(EV_SW, sizeof(bitmask)), bitmask) < 0) {
-        printf("ioctl EVIOCGBIT failed: %s\n", strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
 
@@ -1360,7 +1355,6 @@ static unsigned char add_sync_cap(dterm_t* dt, int fd)
     int i = 0;
 
     if (ioctl(fd, EVIOCGBIT(EV_SYN, sizeof(bitmask)), bitmask) < 0) {
-        printf("ioctl EVIOCGBIT failed: %s\n", strerror(errno));
         return IEDRV_RES_IO_ERROR;
     }
 

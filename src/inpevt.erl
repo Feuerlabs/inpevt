@@ -11,6 +11,7 @@
 -module(inpevt).
 
 -export([subscribe/2, unsubscribe/2, get_devices/0,get_devices/1, get_devices/2,i/0]).
+-export([add_device/1]).
 
 get_devices() ->
     gen_server:call(inpevt_server, { get_devices }).
@@ -27,6 +28,9 @@ subscribe(Port, Pid) ->
 
 unsubscribe(Port,Pid) ->
     gen_server:call(inpevt_server, { unsubscribe, Port, Pid}).
+
+add_device(FileName) ->
+    gen_server:call(inpevt_server, { add_device, FileName }).
 
 i() ->
     gen_server:call(inpevt_server, { i }).

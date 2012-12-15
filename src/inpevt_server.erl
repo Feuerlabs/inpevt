@@ -24,7 +24,6 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--export([add_device/1]).
 
 -define(SERVER, ?MODULE).
 
@@ -72,10 +71,7 @@
           mref::reference()
          }).
 
--record(device, {
-          port::port(),
-          fname::string(),
-          subscribers::[#subscriber{}],
+-record(descriptor, {
           id::string(),
           name::string(),
           bus::atom(),
@@ -84,6 +80,13 @@
           version::integer(),
           topology::string(),
           capabilities::[#cap_spec{}]
+          }).
+
+-record(device, {
+          port::port(),
+          fname::string(),
+          subscribers::[#subscriber{}],
+	  desc::#descriptor {}
           }).
 
 
@@ -111,6 +114,7 @@
 -define (IEDRV_RES_IO_ERROR, 1).
 -define (IEDRV_RES_NOT_OPEN, 2).
 -define (IEDRV_RES_ILLEGAL_ARG, 3).
+-define (IEDRV_RES_COULD_NOT_OPEN, 4).
 
 -define (INPEVT_DRIVER, "inpevt_driver").
 -define (INPEVT_DIRECTORY, "/dev/input").
@@ -132,8 +136,8 @@
 -spec delete_subscriber_from_device(pid(), #device{} ) -> #device{}.
 -spec delete_terminated_subscriber(pid(), [#device{}]) -> [#device{}].
 
--spec filter_cap_key(#device {}, { string(), [#device{}]}) -> [#device{}].
--spec filter_cap_spec(#device {}, { string(), [#device{}]}) -> [#device{}].
+%% -spec filter_cap_key(#device {}, { string(), [#device{}]}) -> [#device{}].
+%% -spec filter_cap_spec(#device {}, { string(), [#device{}]}) -> [#device{}].
 
 
 %%%===================================================================
@@ -167,9 +171,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     process_flag(trap_exit, true),
-    io:fwrite("priv: ~p~n", [code:priv_dir(inpevt)]),
     Res = erl_ddll:load(code:priv_dir(inpevt), ?INPEVT_DRIVER),
-    io:fwrite("Res: ~p~n", [Res]),
     case Res of
 	 ok -> {ok, #state{}};
 	{ _error, Error } -> { stop, Error };
@@ -240,10 +242,20 @@ handle_call({ get_devices, CapKey, CapSpec }, _From, State) ->
     get_devices(State, CapKey, CapSpec);
 
 handle_call({ add_device, FileName }, _From, State) ->
-    io:fwrite("FileName: ~p~n", [FileName]),
-    add_new_device(filename:dirname(FileName),
-		   filename:basename(FileName),
-		   State);
+    { Res, NewState } = add_new_device(FileName, State),
+    {
+      reply,
+      Res,
+      NewState
+    };
+
+handle_call({ delete_device, FileName }, _From, State) ->
+    {
+      reply,
+      ok,
+      #state { devices = delete_existing_device(FileName, State) }
+    };
+
 
 
 
@@ -297,32 +309,6 @@ handle_info(Info, State) ->
             dispatch_event(Info, State),
             {noreply, State};
 
-        %% Since we are talking about simple USB detection here, we can probably
-        %% expect the create atom to be the sole list member.
-        { fevent, _, [ create ], Directory, FileName } ->
-            case FileName of
-               ?INPEVT_PREFIX ++ _ ->
-                    { noreply, add_new_device(Directory, FileName, State) };
-
-               ?INPEVT_TOUCHSCREEN ++ _ ->
-                    { noreply, add_new_device(Directory, FileName, State) };
-
-                _ ->
-                    { noreply, State }
-            end;
-
-        { fevent, _, [ delete ], _Directory, FileName } ->
-            case FileName of
-               ?INPEVT_PREFIX ++ _ ->
-                    { noreply, delete_existing_device(FileName, State) };
-
-               ?INPEVT_TOUCHSCREEN ++ _ ->
-                    { noreply, delete_existing_device(FileName, State) };
-
-                _ ->
-                    {noreply, State}
-            end;
-
         %% Monitor trigger
         { _, _, process, Pid, _ } ->
             {
@@ -333,7 +319,6 @@ handle_info(Info, State) ->
         };
 
         _X ->
-            io:format("handle_info(): ~p\n", [_X]),
             {noreply, State}
     end.
 
@@ -367,20 +352,17 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-add_device(FileName) ->
-    gen_server:call(?SERVER, { add_device, FileName }).
 
 convert_return_value(Bits) ->
     if Bits =:= ?IEDRV_RES_OK -> ok;
        Bits =:= ?IEDRV_RES_ILLEGAL_ARG -> illegal_arg;
        Bits =:= ?IEDRV_RES_IO_ERROR -> io_error;
        Bits =:= ?IEDRV_RES_NOT_OPEN -> not_open;
+       Bits =:= ?IEDRV_RES_COULD_NOT_OPEN -> not_open;
        true -> unknown_error
     end.
 
-
-probe_event_file(Directory, FileName, DeviceList) ->
-    Path = filename:join(Directory,FileName),
+probe_event_file(Path, DeviceList) ->
 
     Port = open_port({spawn, ?INPEVT_DRIVER}, []),
 
@@ -390,52 +372,28 @@ probe_event_file(Directory, FileName, DeviceList) ->
         ok ->
             receive
                 { device_info, _, ReplyID, DrvDev } ->
-                    [ #device {
-                         port=Port,
-                         fname=FileName,
-                         subscribers = [],
-                         id=DrvDev#drv_dev_id.id,
-                         name=DrvDev#drv_dev_id.name,
-                         bus=DrvDev#drv_dev_id.bus,
-                         vendor=DrvDev#drv_dev_id.vendor,
-                         product=DrvDev#drv_dev_id.product,
-                         version=DrvDev#drv_dev_id.version,
-                         topology=DrvDev#drv_dev_id.topology,
-                         capabilities=DrvDev#drv_dev_id.capabilities
-                        } | DeviceList ]
+		  NewDevice = #device {
+					  port=Port,
+					  fname=Path,
+					  subscribers = [],
+		                          desc = #descriptor {
+					    id=DrvDev#drv_dev_id.id,
+					    name=DrvDev#drv_dev_id.name,
+					    bus=DrvDev#drv_dev_id.bus,
+					    vendor=DrvDev#drv_dev_id.vendor,
+					    product=DrvDev#drv_dev_id.product,
+					    version=DrvDev#drv_dev_id.version,
+					    topology=DrvDev#drv_dev_id.topology,
+					    capabilities=DrvDev#drv_dev_id.capabilities
+					    }
+					 },
+		  {
+		    { ok, NewDevice },
+		    #state { devices = [ NewDevice | DeviceList ] }
+		  }
             end;
-        Res ->
-            DeviceList
-    end.
-
-match_and_probe_file(Directory, FileName, DeviceList) ->
-    case FileName of
-        ?INPEVT_PREFIX ++ _ ->
-            probe_event_file(Directory, FileName, DeviceList);
-
-        ?INPEVT_TOUCHSCREEN ++ _ ->
-            probe_event_file(Directory, FileName, DeviceList);
-
-        _ ->
-            io:fwrite("No match on: ~p\n", [?INPEVT_PREFIX]),
-            DeviceList
-    end.
-
-
-scan_event_directory(Directory) ->
-    fnotify:watch(Directory),  %% Start subscribing to changes.
-    io:fwrite("Scanning: ~p\n", [Directory]),
-    case file:list_dir(Directory) of
-        { ok, List } ->
-            Devices = lists:foldl(fun(FileName, Acc) ->
-                                          match_and_probe_file(Directory, FileName, Acc)
-                                  end,
-                                  [],
-                                  List),
-            { ok, Devices };
-
-        { error, Reason } ->
-            { error, Reason }
+        Err ->
+            { { Err },  #state { devices = DeviceList }}
     end.
 
 
@@ -544,23 +502,25 @@ event_port_control(Port, Command, PortArg) ->
 
 
 
-get_devices(State) when State#state.devices =:= [] ->
-    {Result, Devices } = scan_event_directory(?INPEVT_DIRECTORY),
-    case Result of
-	ok ->
-	    { reply, { ok, Devices }, #state { devices = Devices } };
+%% get_devices(State) when State#state.devices =:= [] ->
+%%     {Result, Devices } = scan_event_directory(?INPEVT_DIRECTORY),
+%%     case Result of
+%% 	ok ->
+%% 	    { reply, { ok, Devices }, #state { devices = Devices } };
 
-	_ ->
-	    { reply, Result, State }
-    end;
-
-
+%% 	_ ->
+%% 	    { reply, Result, State }
+%%     end;
 
 
-get_devices(State) when State#state.devices =/= [] ->
+
+
+%%get_devices(State) when State#state.devices =/= [] ->
+get_devices(State) ->
     {
       reply,
       {ok, State#state.devices},
+
       State
     }.
 
@@ -568,56 +528,56 @@ get_devices(State) when State#state.devices =/= [] ->
 get_devices(State, CapKey) ->
     { reply, Result, NewState } = get_devices(State),
     case Result of
-        { ok, Devices } ->
-            {
-              reply,
-              {
-                ok,
-                element(2, lists:foldl(fun filter_cap_key/2, { CapKey, []}, Devices))
-              },
-              NewState
-            };
-        Err ->
-            { reply, Err, NewState }
+	{ ok, Devices } ->
+	    {
+	  reply,
+	  {
+	    ok,
+	    element(2, lists:foldl(fun filter_cap_key/2, { CapKey, []}, Devices))
+	  },
+	  NewState
+	 };
+	Err ->
+	    { reply, Err, NewState }
     end.
 
 
 get_devices(State, CapKey, CapSpec) ->
     { reply, Result, NewState } = get_devices(State, CapKey),
     case Result of
-        { ok, Devices } ->
-            {_, _, Res} = lists:foldl(fun filter_cap_spec/2, { CapKey, CapSpec, []}, Devices),
-            {
-              reply,
-              {
-                ok,
-                Res
-              },
-              NewState
-            };
-        Err ->
-            { reply, Err, NewState }
+	{ ok, Devices } ->
+	    {_, _, Res} = lists:foldl(fun filter_cap_spec/2, { CapKey, CapSpec, []}, Devices),
+	    {
+	      reply,
+	      {
+		ok,
+		Res
+	      },
+	      NewState
+	    };
+	Err ->
+	    { reply, Err, NewState }
     end.
 
 
 filter_cap_key(Device, { CapKey, MatchingDevList }) ->
-    case proplists:is_defined(CapKey, Device#device.capabilities) of
-        true -> { CapKey, [ Device | MatchingDevList ] };
-        false -> { CapKey, MatchingDevList }
+    case proplists:is_defined(CapKey, (Device#device.desc)#descriptor.capabilities) of
+	true -> { CapKey, [ Device | MatchingDevList ] };
+	false -> { CapKey, MatchingDevList }
     end.
 
 
 filter_cap_spec(Device, { CapKey, CapSpec, MatchingDevList }) ->
-    case proplists:get_value(CapKey, Device#device.capabilities) of
-        undefined -> { CapKey, CapSpec, MatchingDevList };
-        Match->
-            case proplists:is_defined(CapSpec, Match) of
-                true ->
-                    { CapKey, CapSpec, [ Device | MatchingDevList ] };
+    case proplists:get_value(CapKey, (Device#device.desc)#descriptor.capabilities) of
+	undefined -> { CapKey, CapSpec, MatchingDevList };
+	Match->
+	    case proplists:is_defined(CapSpec, Match) of
+		true ->
+		    { CapKey, CapSpec, [ Device | MatchingDevList ] };
 
-                false ->
-                    { CapKey, CapSpec,  MatchingDevList }
-            end
+		false ->
+		    { CapKey, CapSpec,  MatchingDevList }
+	    end
 
     end.
 
@@ -634,27 +594,23 @@ dispatch_event(Event, State) ->
             found
     end.
 
-
-
-add_new_device(Directory, FileName, State) ->
+add_new_device(Path, State) ->
     %% Dies the device already exist? If so just return.
-    case lists:keyfind(FileName,
+    case lists:keyfind(Path,
                        #device.fname,
                        State#state.devices) of
         %% Device does not exist, create.
         false ->
-             #state {
-          devices = probe_event_file(Directory, FileName, State#state.devices)
-         };
+	    probe_event_file(Path, State#state.devices);
 
-        %% Device
-        _ ->
-            State
+        %% Device already exists
+        Dev ->
+            { { ok, Dev }, State }
     end.
 
-delete_existing_device(FileName, State) ->
+delete_existing_device(Path, State) ->
     %% Locate the device
-    case lists:keytake(FileName,
+    case lists:keytake(Path,
                        #device.fname,
                        State#state.devices) of
 
@@ -672,9 +628,6 @@ delete_existing_device(FileName, State) ->
             #state { devices = NewDeviceList }
 
     end.
-
-
-
 
 
 
