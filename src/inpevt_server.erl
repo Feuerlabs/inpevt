@@ -20,6 +20,9 @@
 %% API
 -export([start_link/0]).
 
+-include("inpevt.hrl").
+
+
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -27,60 +30,11 @@
 
 -define(SERVER, ?MODULE).
 
--record(syn, { element:: report | config | mt_report | mt_dropped }).
-
-
--record(key, { key, code::integer() }).
-
-
--record(rel, { element:: x | y | z | rx | ry | rz | hwheel | dial | wheel | misc }).
-
-
--record(absinfo, { value::integer(), minimum::integer(), maximum::integer(),
-                   fuzz::integer(), flat::integer(), resolution::integer() }).
-
-
--record(abs, { element:: x | y | z | rx | ry | rz | throttle | rudder | wheel | gas |
-                         brake | hat0x | hat0y | hat1x | hat1y | hat2x | hat2y | hat3x |
-                         hat3y | pressure | distance | tilt_x | tilt_y | tool_width | volume | misc |
-                         mt_slot | mt_touch_major | mt_touch_minor | mt_width_major | mt_width_minor |
-                         mt_orientation | mt_position_x | mt_position_y | mt_tool_type | mt_blob_id |
-                         mt_tracking_id | mt_pressure | mt_distance,  spec::#absinfo{} }).
-
-
--record(sw, { element:: lid | tablet_mode | headphone_insert | rfkill_all | radio | microphone_insert |
-                        dock | lineout_insert | jack_physical_insert | videoout_insert |
-                        camera_lens_cover | keypad_slide | front_proximity | rotate_lock |
-                        linein_insert }).
-
--record(cap_spec, { element::#syn {} | #key {} | #rel {} | #abs {} | #sw {} }).
-
--record(drv_dev_id, {
-          id::string(),
-          name::string(),
-          bus::atom(),
-          vendor::integer(),
-          product::integer(),
-          version::integer(),
-          topology::string(),
-          capabilities::[#cap_spec{}]
-          }).
-
 -record(subscriber, {
           pid::pid(),
           mref::reference()
          }).
 
--record(descriptor, {
-          id::string(),
-          name::string(),
-          bus::atom(),
-          vendor::integer(),
-          product::integer(),
-          version::integer(),
-          topology::string(),
-          capabilities::[#cap_spec{}]
-          }).
 
 -record(device, {
           port::port(),
@@ -90,15 +44,11 @@
           }).
 
 
+
 -record(state, {
           devices = [] ::[#device{}]
          }).
 
-%% From /usr/include/linux/input.h
--record(input_event,
-        {
-          port, sec, usec, type, code_sym, code_num, value
-        }).
 
 -record(removed_event,
         {
@@ -367,6 +317,7 @@ probe_event_file(Path, DeviceList) ->
     Port = open_port({spawn, ?INPEVT_DRIVER}, []),
 
     { Res, ReplyID } = event_port_control(Port, ?IEDRV_CMD_PROBE, [Path]),
+						       
 
     case Res of
         ok ->
